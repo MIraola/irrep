@@ -148,6 +148,10 @@ class BandStructure:
             self.__init_wannier(
                 prefix, Ecut, IBstart, IBend, kplist, EF=EF, onlysym=onlysym, refUC=refUC, shiftUC=shiftUC, search_cell=search_cell
             )
+        elif code == "mpb":
+            self.__init_mpb(
+                prefix=prefix, Ecut=Ecut, IBstart=IBstart, IBend=IBend, kplist=kplist, EF=EF, onlysym=onlysym, refUC=refUC, shiftUC=shiftUC, search_cell=search_cell
+            )
         else:
             raise RuntimeError("Unknown/unsupported code :{}".format(code))
 
@@ -203,7 +207,7 @@ class BandStructure:
             raise RuntimeError(
                 "spinor should be specified in the command line for VASP bandstructure"
             )
-        self.spacegroup = SpaceGroup(inPOSCAR=fPOS, spinor=spinor, refUC=refUC, shiftUC=shiftUC, search_cell=search_cell)
+        self.spacegroup = SpaceGroup(file_structure=fPOS, spinor=spinor, refUC=refUC, shiftUC=shiftUC, search_cell=search_cell)
         self.spinor = spinor
         if onlysym:
             return
@@ -340,7 +344,7 @@ class BandStructure:
         usepaw = header.usepaw
         self.spinor = header.spinor
         self.spacegroup = SpaceGroup(
-            cell=(header.rprimd, header.xred, header.typat), spinor=self.spinor, refUC=refUC, shiftUC=shiftUC, search_cell=search_cell
+            code='abinit', cell=(header.rprimd, header.xred, header.typat), spinor=self.spinor, refUC=refUC, shiftUC=shiftUC, search_cell=search_cell
         )
         if onlysym:
             return
@@ -690,7 +694,7 @@ class BandStructure:
         )
 
         self.spacegroup = SpaceGroup(
-            cell=(self.Lattice, xred, typat), spinor=self.spinor, refUC=refUC, shiftUC=shiftUC, search_cell=search_cell
+            code='wannier', cell=(self.Lattice, xred, typat), spinor=self.spinor, refUC=refUC, shiftUC=shiftUC, search_cell=search_cell
         )
         if onlysym:
             return
@@ -820,7 +824,7 @@ class BandStructure:
         xred = (np.array(xcart, dtype=float) * BOHR).dot(np.linalg.inv(self.Lattice))
         #        print ("xred=",xred)
         self.spacegroup = SpaceGroup(
-            cell=(self.Lattice, xred, typat), spinor=self.spinor, refUC=refUC, shiftUC=shiftUC, search_cell=search_cell
+            code='espresso', cell=(self.Lattice, xred, typat), spinor=self.spinor, refUC=refUC, shiftUC=shiftUC, search_cell=search_cell
         )
         if onlysym:
             return
@@ -934,6 +938,30 @@ class BandStructure:
     #        myroot = mytree.getroot()
     #        print (myroot)
     #        exit()
+
+    def __init_mpb(
+            self,
+            prefix,
+            Ecut=None,
+            IBstart=None,
+            IBend=None,
+            kplist=None,
+            EF='0.0',
+            onlysym=False,
+            refUC=None,
+            shiftUC=None,
+            search_cell = False
+            ):
+
+        self.spacegroup = SpaceGroup(
+                code='mpb',
+                file_structure=prefix+'-epsilon.h5',
+                spinor=False,
+                refUC=refUC,
+                shiftUC=shiftUC,
+                search_cell=search_cell
+                )
+
 
     def getNK():
         """Getter for `self.kpoints`."""

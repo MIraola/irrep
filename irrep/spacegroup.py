@@ -502,7 +502,7 @@ class SpaceGroup():
     ..math:: G=T+ g_1 T + g_2 T +...+ g_N T 
     """
 
-    def __cell_vasp(self, inPOSCAR):
+    def __cell_vasp(self, fPOS):
         """
         Parses POSCAR.
 
@@ -522,7 +522,7 @@ class SpaceGroup():
         numbers : list
             Each element is a number identifying the atomic species of an ion.
         """
-        fpos = (l.strip() for l in open(inPOSCAR))
+        fpos = (l.strip() for l in open(fPOS))
         title = next(fpos)
         lattice = float(
             next(fpos)) * np.array([next(fpos).split() for i in range(3)], dtype=float)
@@ -583,6 +583,7 @@ class SpaceGroup():
 
         # Atom types. All same type (generalize for many dielectrics)
         numbers = [1] * num_atoms
+        np.savetxt('positions.txt', positions)
 
         return lattice, positions, numbers
 
@@ -630,7 +631,7 @@ class SpaceGroup():
         if code == 'mpb':
             cell = self.__cell_mpb(file_epsilon=file_structure)
         elif code == 'vasp':
-            cell = self.__cell_vasp(inPOSCAR=file_structure)
+            cell = self.__cell_vasp(fPOS=file_structure)
         elif cell is None:
             raise RuntimeError("Problem when parsing crystal structure")
 

@@ -22,7 +22,8 @@ setuptools.setup(
         "monty",
         "ruamel.yaml",
         "irreptables",
-        "fortio"
+        "fortio",
+        "h5py"
     ],
     include_package_data=False,
     url="https://github.com/stepan-tsirkin/irrep",

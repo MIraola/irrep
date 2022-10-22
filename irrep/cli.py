@@ -140,7 +140,7 @@ do not hesitate to contact the author:
 )
 @click.option(
     "-code",
-    type=click.Choice(["vasp", "abinit", "espresso", "wannier90"]),
+    type=click.Choice(["vasp", "abinit", "espresso", "wannier90", "mpb"]),
     default="vasp",
     help="Set which electronic structure code to interface with. If using ABINIT, always use "
     '"istwfk=1".',

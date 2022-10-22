@@ -22,6 +22,7 @@ from scipy.linalg import expm
 import spglib
 from irreptables import IrrepTable
 from scipy.optimize import minimize
+import h5py
 from .utility import str_
 
 pauli_sigma = np.array(
@@ -560,7 +561,33 @@ class SpaceGroup():
             positions = positions.dot(np.linalg.inv(lattice))
         return lattice, positions, numbers
 
-    def _findsym(self, inPOSCAR, cell):
+    def __cell_mpb(self, file_epsilon):
+        '''
+        Docstring
+        '''
+        f = h5py.File(file_epsilon, 'r')
+
+        # Parse lattice vectors
+        lattice = f['lattice vectors'][:,:]
+
+        # Populate dielectric with atoms to pass to spglib
+        epsilon = f['epsilon.xx'][:,:]
+        grid = epsilon.shape
+        maximum = np.max(epsilon)
+        num_atoms = np.count_nonzero(epsilon == maximum)
+
+        positions = np.zeros((num_atoms, 3), dtype=float)
+        indices = np.where(epsilon == maximum)
+        for i in range(2):  # 2D
+            positions[:,i] = indices[i] / grid[i]
+
+        # Atom types. All same type (generalize for many dielectrics)
+        numbers = [1] * num_atoms
+
+        return lattice, positions, numbers
+
+
+    def _findsym(self, code, file_structure, cell):
         """
         Finds the space-group and constructs a list of symmetry operations
         
@@ -600,8 +627,13 @@ class SpaceGroup():
             centrosymmetric groups they adopt origin choice 1 of ITA, rather 
             than choice 2 (BCS).
         """
-        if cell is None:
-            cell = self.__cell_vasp(inPOSCAR=inPOSCAR)
+        if code == 'mpb':
+            cell = self.__cell_mpb(file_epsilon=file_structure)
+        elif code == 'vasp':
+            cell = self.__cell_vasp(inPOSCAR=file_structure)
+        elif cell is None:
+            raise RuntimeError("Problem when parsing crystal structure")
+
         print('')
         print('\n ----------INFORMATION ABOUT THE UNIT CELL----------- \n')
         print('')
@@ -632,14 +664,15 @@ class SpaceGroup():
                 dataset['origin_shift']
                 )
 
-    def __init__(self, inPOSCAR=None, cell=None, spinor=True, refUC=None, shiftUC=None, search_cell=False):
+    def __init__(self, code='vasp', file_structure=None, cell=None, spinor=True, refUC=None, shiftUC=None, search_cell=False):
         self.spinor = spinor
         (self.symmetries, 
          self.name, 
          self.number, 
          self.Lattice, 
          refUC_tmp, 
-         shiftUC_tmp) = self._findsym(inPOSCAR, cell)
+         shiftUC_tmp) = self._findsym(code, file_structure, cell)
+            
         self.RecLattice = np.array([np.cross(self.Lattice[(i + 1) %
                                                           3], self.Lattice[(i + 2) %
                                                                            3]) for i in range(3)]) * 2 * np.pi / np.linalg.det(self.Lattice)

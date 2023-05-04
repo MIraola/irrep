@@ -1,4 +1,6 @@
 {
+"fWAV": "reference_output/WAVECAR",
+"fPOS": "dft_inputs/POSCAR",
 "spinor": true,
 "code": "vasp",
 "kpnames": "T,GM,F,L",

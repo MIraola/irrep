@@ -1,3 +1,5 @@
+fWAV: "reference_output/WAVECAR"
+fPOS: "dft_inputs/POSCAR"
 spinor: True
 code: "vasp"   
 kpnames: "T,GM,F,L"

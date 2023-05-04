@@ -1,0 +1,8 @@
+{
+"Ecut": 50,
+"code": "abinit",
+"fWFK": "reference_output/O_DS2_WFK",
+"refUC": "0,-1,1,1,0,-1,-1,-1,-1",
+"IBend": 4,
+"kpnames": "GM" 
+}

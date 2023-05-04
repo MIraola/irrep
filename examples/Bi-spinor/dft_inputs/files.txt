@@ -1,0 +1,6 @@
+abinit_parameters.in
+abinit.out
+I
+O
+O_x
+Bi.xml

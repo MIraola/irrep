@@ -1,0 +1,43 @@
+ixc 11
+ndtset 2
+istwfk *1  # Mandatory!
+prtvol 2
+pawspnorb 1
+
+acell 1.0 1.0 1.0 angstrom
+rprim   2.2740000000000000 1.3128945121372089 3.9506666666666668
+       -2.2740000000000000 1.3128945121372089 3.9506666666666668
+        0.0000000000000000 -2.6257890242744177 3.9506666666666668
+ntypat 1    
+znucl 83    
+natom 2
+typat 1 1
+xred   
+0.7630000000000002 0.7630000000000002 0.7630000000000002
+0.2369999999999998 0.2369999999999998 0.2369999999999998
+
+ecut 350 eV
+pawecutdg 1000 eV
+nstep 200
+occopt 4
+tsmear 0.001
+enunit 1
+nbdbuf 6
+
+# DATABASE 1: SELF-CONSISTENT CALCULATION
+iscf1 17
+kptopt1 4
+ngkpt1 5 5 5
+toldfe1 1.0d-6
+prtwf1 0
+nband1 70
+
+# DATASET 2: CALCULATE WAVE FUNCTIONS
+iscf2 -2
+getden2 -1
+kptopt2 0
+kpt2 0.0 0.0 0.0
+nkpt2 1
+tolwfr2 1.0d-10
+prtwf2 1
+nband2 10

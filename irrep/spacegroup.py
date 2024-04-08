@@ -82,7 +82,7 @@ class SymmetryOperation():
         to that in tables.
     """
 
-    def __init__(self, rot, trans, Lattice, ind=-1, spinor=True, S=None, is_inv=None):
+    def __init__(self, rot, trans, Lattice, ind=-1, spinor=True, S=None, is_inv=None, angle=None, axis=None, d=None):
         if S is None:
             self.ind = ind
             self.rotation = rot
@@ -101,8 +101,13 @@ class SymmetryOperation():
             self.sign = 1  # May be changed later externally
         
         else:  # FPLO case, S is the spin representation matrix
-            # To do: add identification of axis, angle and d
-            pass
+            self.spinor_rotation = S
+            self.angle = angle
+            self.axis = axis
+            self.d = d
+            self.inversion = is_inv
+
+
 
     def get_angle_str(self):
         """
@@ -662,15 +667,62 @@ class SpaceGroup():
         elif spin_rep is not None and inversion_list is not None:
 
             self.order = len(spin_rep)  # new attribute
-            list_angles = np.zeros(len(spin_rep), dtype=float)
-            list_axes = np.zeros((len(spin_rep), 3), dtype=float)
-            d_list = np.full(len(spin_rep), True, dtype=bool)
 
-            # To do: save in attributes info about SG parsed
-
+            # Identify angles and axes. Not in SymmetryOperation 
+            # because we need angles of all syms
             self.symmetries = []
-            for isym in range(self.order):
-                self.symmetries.append(SymmetryOperation(S=spin_rep[isym], is_inv=inversion_list[isym]))
+            for S in range(spin_rep):
+
+                angle, axis, d = self.identify_from_spinrep(S)
+                self.symmetries.append(SymmetryOperation(S=S, angle=angle, axis=axis, d=d, is_inv=is_inv)
+
+            # Correct identification of dihedral symmetries
+
+
+    def identify_from_spinrep(self, S):
+        '''
+        Identify angle and axis or rotation from spin-representation 
+        matrix.
+        '''
+
+        # Identify angle
+        c = 0.5 * np.trace(S)
+        if np.abs(c) < 1e-2:  # C2
+            angle = np.pi
+        elif c < -1e-2:  # +2pi operation
+            d = True
+            S = -S
+            c = 0.5 * np.trace(S)
+            angle = 2.0 * np.arccos(c)
+        else:  # E, C3, C4 or C6
+            d = False
+            angle = 2.0 * np.arccos(c)
+
+        # Identify axis and reverse it if the reverse angle was found
+        axis = 0.5j * np.einsum('jk,ikj->i', S, pauli_sigma)
+        if np.abs(angle) > 1e-2:  # axis is zero for E
+            axis /= np.linalg.norm(axis)
+        is_inverse_in = np.any(np.all(np.isclose(self.axes, -axis), axis=1))
+        if is_inverse_in:
+            axis *= -1
+            if np.abs(angle - np.pi) < 1e-2:  # pi + 2pi operation
+                d = True
+            else:
+                angle *= -1
+        elif np.abs(angle - np.pi) < 1e-2:
+            d = False
+
+        # Check angle and axis are real
+        if np.abs(np.imag(angle)) < 1e-5:
+            raise RuntimeError("Complex angle detected!")
+        if np.max(np.abs(np.imag(axis))) < 1e-5:
+            raise RuntimeError("Complex axis detected!")
+
+        return angle/np.pi, axis, d
+
+
+
+
 
     @property
     def angles(self):

@@ -207,6 +207,11 @@ class BandStructure:
             self.Lattice, positions, typat, kpred = parser.parse_lattice()
             Energies = parser.parse_energies()
 
+        elif code == "fplo":
+            # To do: add calls to class for parsing FPLO input
+            pass
+
+
         else:
             raise RuntimeError("Unknown/unsupported code :{}".format(code))
 

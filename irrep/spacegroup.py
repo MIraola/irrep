@@ -82,22 +82,27 @@ class SymmetryOperation():
         to that in tables.
     """
 
-    def __init__(self, rot, trans, Lattice, ind=-1, spinor=True):
-        self.ind = ind
-        self.rotation = rot
-        self.Lattice = Lattice
-        self.translation = trans % 1
-        self.translation[1 - self.translation < 1e-5] = 0
-        self.axis, self.angle, self.inversion = self._get_operation_type()
-        iangle = (round(self.angle / pi * 6) + 6) % 12 - 6
-        if iangle == -6:
-            iangle = 6
-        self.angle = iangle * pi / 6
-        self.angle_str = self.get_angle_str()
-        self.spinor = spinor
-        self.spinor_rotation = expm(-0.5j * self.angle *
-                                    np.einsum('i,ijk->jk', self.axis, pauli_sigma))
-        self.sign = 1  # May be changed later externally
+    def __init__(self, rot, trans, Lattice, ind=-1, spinor=True, S=None, is_inv=None):
+        if S is None:
+            self.ind = ind
+            self.rotation = rot
+            self.Lattice = Lattice
+            self.translation = trans % 1
+            self.translation[1 - self.translation < 1e-5] = 0
+            self.axis, self.angle, self.inversion = self._get_operation_type()
+            iangle = (round(self.angle / pi * 6) + 6) % 12 - 6
+            if iangle == -6:
+                iangle = 6
+            self.angle = iangle * pi / 6
+            self.angle_str = self.get_angle_str()
+            self.spinor = spinor
+            self.spinor_rotation = expm(-0.5j * self.angle *
+                                        np.einsum('i,ijk->jk', self.axis, pauli_sigma))
+            self.sign = 1  # May be changed later externally
+        
+        else:  # FPLO case, S is the spin representation matrix
+            # To do: add identification of axis, angle and d
+            pass
 
     def get_angle_str(self):
         """
@@ -573,81 +578,109 @@ class SpaceGroup():
 
     def __init__(
             self,
-            cell,
+            cell=None,
             spinor=True,
             refUC=None,
             shiftUC=None,
             search_cell=False,
-            trans_thresh=1e-5
+            trans_thresh=1e-5,
+            spin_rep=None,
+            inversion_list=None
             ):
         self.spinor = spinor
-        (self.symmetries, 
-         self.name, 
-         self.number, 
-         self.Lattice, 
-         refUC_tmp, 
-         shiftUC_tmp) = self._findsym(cell)
-        self.RecLattice = np.array([np.cross(self.Lattice[(i + 1) %
-                                                          3], self.Lattice[(i + 2) %
-                                                                           3]) for i in range(3)]) * 2 * np.pi / np.linalg.det(self.Lattice)
-        print(" Reciprocal lattice:\n", self.RecLattice)
 
-        # Determine refUC and shiftUC according to entries in CLI
-        self.symmetries_tables = IrrepTable(self.number, self.spinor).symmetries
-        self.refUC, self.shiftUC = self.determine_basis_transf(
-                                            refUC_cli=refUC, 
-                                            shiftUC_cli=shiftUC,
-                                            refUC_lib=refUC_tmp, 
-                                            shiftUC_lib=shiftUC_tmp,
-                                            search_cell=search_cell,
-                                            trans_thresh=trans_thresh
-                                            )
+        if cell is not None:
+            (self.symmetries, 
+             self.name, 
+             self.number, 
+             self.Lattice, 
+             refUC_tmp, 
+             shiftUC_tmp) = self._findsym(cell)
+            self.RecLattice = np.array([np.cross(self.Lattice[(i + 1) %
+                                                              3], self.Lattice[(i + 2) %
+                                                                               3]) for i in range(3)]) * 2 * np.pi / np.linalg.det(self.Lattice)
+            print(" Reciprocal lattice:\n", self.RecLattice)
 
-        # Check matching of symmetries in refUC. If user set transf.
-        # in the CLI and symmetries don't match, raise a warning.
-        # Otherwise, transf. was calculated automatically and 
-        # matching of symmetries was checked in determine_basis_transf
-        try:
-            ind, dt, signs = self.match_symmetries(signs=self.spinor,
-                                                   trans_thresh=trans_thresh
-                                                   )
-            # Sort symmetries like in tables
-            args = np.argsort(ind)
-            for i,i_ind in enumerate(args):
-                self.symmetries[i_ind].ind = i+1
-                self.symmetries[i_ind].sign = signs[i_ind]
-                self.symmetries.append(self.symmetries[i_ind])
-            self.symmetries = self.symmetries[i+1:]
-        except RuntimeError:
-            if search_cell:  # symmetries must match to identify irreps
-                raise RuntimeError((
-                    "refUC and shiftUC don't transform the cellto one where "
-                    "symmetries are identical to those read from tables. "
-                    "Try without specifying refUC and shiftUC."
-                    ))
-            elif refUC is not None or shiftUC is not None:
-                # User specified refUC or shiftUC in CLI. He/She may
-                # want the traces in a cell that is not neither the
-                # one in tables nor the DFT one
-                print(("WARNING: refUC and shiftUC don't transform the cell to "
-                       "one where symmetries are identical to those read from "
-                       "tables. If you want to achieve the same cell as in "
-                       "tables, try not specifying refUC and shiftUC."))
-                pass
+            # Determine refUC and shiftUC according to entries in CLI
+            self.symmetries_tables = IrrepTable(self.number, self.spinor).symmetries
+            self.refUC, self.shiftUC = self.determine_basis_transf(
+                                                refUC_cli=refUC, 
+                                                shiftUC_cli=shiftUC,
+                                                refUC_lib=refUC_tmp, 
+                                                shiftUC_lib=shiftUC_tmp,
+                                                search_cell=search_cell,
+                                                trans_thresh=trans_thresh
+                                                )
 
-        # Print transformation and basis vectors in both settings
-        refUC_print = self.refUC.T  # print following convention in paper
-        print("\nThe cell transformation is given by: \n"
-              + "        | {} |\n".format("".join(["{:8.4f}".format(el) for el in refUC_print[0]]))
-              + "refUC = | {} |    shiftUC = {}\n".format("".join(["{:8.4f}".format(el) for el in refUC_print[1]]), np.round(self.shiftUC, 5))
-              + "        | {} |\n".format("".join(["{:8.4f}".format(el) for el in refUC_print[2]]))
-              )
-        print("Lattice vectors of DFT (a) and reference (c) cells:")
-        Lattice_conv = self.refUC.T.dot(self.Lattice)
-        for i in range(3):
-            l_str = "a({:1d})=[{} ]".format(i, "".join("{:8.4f}".format(x) for x in self.Lattice[i]))
-            r_str = "c({:1d})=[{} ]".format(i, "".join("{:8.4f}".format(x) for x in Lattice_conv[i]))
-            print("    ".join((l_str,r_str)))
+            # Check matching of symmetries in refUC. If user set transf.
+            # in the CLI and symmetries don't match, raise a warning.
+            # Otherwise, transf. was calculated automatically and 
+            # matching of symmetries was checked in determine_basis_transf
+            try:
+                ind, dt, signs = self.match_symmetries(signs=self.spinor,
+                                                       trans_thresh=trans_thresh
+                                                       )
+                # Sort symmetries like in tables
+                args = np.argsort(ind)
+                for i,i_ind in enumerate(args):
+                    self.symmetries[i_ind].ind = i+1
+                    self.symmetries[i_ind].sign = signs[i_ind]
+                    self.symmetries.append(self.symmetries[i_ind])
+                self.symmetries = self.symmetries[i+1:]
+            except RuntimeError:
+                if search_cell:  # symmetries must match to identify irreps
+                    raise RuntimeError((
+                        "refUC and shiftUC don't transform the cellto one where "
+                        "symmetries are identical to those read from tables. "
+                        "Try without specifying refUC and shiftUC."
+                        ))
+                elif refUC is not None or shiftUC is not None:
+                    # User specified refUC or shiftUC in CLI. He/She may
+                    # want the traces in a cell that is not neither the
+                    # one in tables nor the DFT one
+                    print(("WARNING: refUC and shiftUC don't transform the cell to "
+                           "one where symmetries are identical to those read from "
+                           "tables. If you want to achieve the same cell as in "
+                           "tables, try not specifying refUC and shiftUC."))
+                    pass
+
+            # Print transformation and basis vectors in both settings
+            refUC_print = self.refUC.T  # print following convention in paper
+            print("\nThe cell transformation is given by: \n"
+                  + "        | {} |\n".format("".join(["{:8.4f}".format(el) for el in refUC_print[0]]))
+                  + "refUC = | {} |    shiftUC = {}\n".format("".join(["{:8.4f}".format(el) for el in refUC_print[1]]), np.round(self.shiftUC, 5))
+                  + "        | {} |\n".format("".join(["{:8.4f}".format(el) for el in refUC_print[2]]))
+                  )
+            print("Lattice vectors of DFT (a) and reference (c) cells:")
+            Lattice_conv = self.refUC.T.dot(self.Lattice)
+            for i in range(3):
+                l_str = "a({:1d})=[{} ]".format(i, "".join("{:8.4f}".format(x) for x in self.Lattice[i]))
+                r_str = "c({:1d})=[{} ]".format(i, "".join("{:8.4f}".format(x) for x in Lattice_conv[i]))
+                print("    ".join((l_str,r_str)))
+        
+        # Lines for FPLO
+        elif spin_rep is not None and inversion_list is not None:
+
+            self.order = len(spin_rep)  # new attribute
+            list_angles = np.zeros(len(spin_rep), dtype=float)
+            list_axes = np.zeros((len(spin_rep), 3), dtype=float)
+            d_list = np.full(len(spin_rep), True, dtype=bool)
+
+            # To do: save in attributes info about SG parsed
+
+            self.symmetries = []
+            for isym in range(self.order):
+                self.symmetries.append(SymmetryOperation(S=spin_rep[isym], is_inv=inversion_list[isym]))
+
+    @property
+    def angles(self):
+        angles_list = [sym.angle for sym in self.symmetries]
+        return angles_list
+
+    @property
+    def axes(self):
+        axes_list = [sym.axis for sym in self.symmetries]
+        return axes_list
 
     def show(self, symmetries=None):
         """

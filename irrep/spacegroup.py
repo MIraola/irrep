@@ -82,7 +82,7 @@ class SymmetryOperation():
         to that in tables.
     """
 
-    def __init__(self, rot, trans, Lattice, ind=-1, spinor=True, S=None, is_inv=None, angle=None, axis=None, d=None):
+    def __init__(self, rot=None, trans=None, Lattice=None, ind=-1, spinor=True, S=None, is_inv=None, angle=None, axis=None, d=None):
         if S is None:
             self.ind = ind
             self.rotation = rot
@@ -107,6 +107,7 @@ class SymmetryOperation():
             self.axis = axis
             self.d = d
             self.inversion = is_inv
+            self.ind = ind
 
 
 
@@ -591,7 +592,8 @@ class SpaceGroup():
             search_cell=False,
             trans_thresh=1e-5,
             spin_rep=None,
-            inversion_list=None
+            inversion_list=None,
+            sg=None  # temporal, to test FPLO interface
             ):
         self.spinor = spinor
 
@@ -665,7 +667,14 @@ class SpaceGroup():
                 print("    ".join((l_str,r_str)))
         
         # Lines for FPLO
-        elif spin_rep is not None and inversion_list is not None:
+        #elif spin_rep is not None and inversion_list is not None:
+        elif sg is not None:
+
+            # Temporarily, import spin rep from tables to test FPLO
+            irreptable = IrrepTable(sg, spinor=True)
+            spin_rep = [sym.S for sym in irreptable.symmetries]
+            spin_rep += [-S for S in spin_rep]  # add +2pi operations
+            spin_rep = np.array(spin_rep, dtype=complex)
 
             self.order = len(spin_rep)  # new attribute
             self.primary_axis = None
@@ -674,10 +683,10 @@ class SpaceGroup():
             # Identify angles and axes. Not in SymmetryOperation 
             # because we need angles of all syms
             self.symmetries = []
-            for S in range(spin_rep):
+            for isym, S in enumerate(spin_rep):
 
                 angle, axis, d = self.identify_from_spinrep(S)
-                self.symmetries.append(SymmetryOperation(S=S, angle=angle, axis=axis, d=d, is_inv=True))  # to do: change is_inv to parsed from input file
+                self.symmetries.append(SymmetryOperation(S=S, angle=angle, axis=axis, d=d, is_inv=True, ind=isym))  # to do: change is_inv to parsed from input file
 
             # Identify primary axis
             if self.order == 1:  # group P1
@@ -729,6 +738,11 @@ class SpaceGroup():
                         if self._need_reverse:
                             self.symmetries[isym].d = not self.symmetries[isym].d
                             self.symmetries[isym].axis *= - 1.0
+            
+            # Test printing
+            for sym in self.symmetries:
+                print('\n---- SYM {} ----\n'.format(sym.ind))
+                self.print_spinor(sym)
 
 
     def _need_reverse(self, primary_order, m, d):
@@ -757,18 +771,6 @@ class SpaceGroup():
                 need_reverse = True
         
         return need_reverse
-
-
-            
-
-            
-
-
-
-
-        
-
-
 
 
     def identify_from_spinrep(self, S):
@@ -805,30 +807,55 @@ class SpaceGroup():
             d = False
 
         # Check angle and axis are real
-        if np.abs(np.imag(angle)) < 1e-5:
-            raise RuntimeError("Complex angle detected!")
-        if np.max(np.abs(np.imag(axis))) < 1e-5:
-            raise RuntimeError("Complex axis detected!")
+        if np.abs(np.imag(angle)) > 1e-5:
+            raise RuntimeError("Complex angle detected: {}".format(angle))
+        if np.max(np.abs(np.imag(axis))) > 1e-5:
+            raise RuntimeError("Complex axis detected: {}".format(axis))
 
         return angle/np.pi, axis, d
 
     @property
     def angles(self):
-        angles_list = [sym.angle for sym in self.symmetries]
-        angles_list = np.array(angles_list)
+        if len(self.symmetries) == 0:
+            angles_list = np.zeros(self.order, dtype=float)
+        else:
+            angles_list = [sym.angle for sym in self.symmetries]
+            angles_list = np.array(angles_list)
         return angles_list
 
     @property
     def axes(self):
-        axes_list = [sym.axis for sym in self.symmetries]
-        axes_list = np.array(axes_list)
+        if len(self.symmetries) == 0:
+            axes_list = np.zeros((self.order, 3), dtype=float)
+        else:
+            axes_list = [sym.axis for sym in self.symmetries]
+            axes_list = np.array(axes_list)
         return axes_list
 
     @property
     def d_list(self):
-        d_list = [sym.d for sym in self.symmetries]
-        d_list = np.array(d_list, dtype=bool)
+        if len(self.symmetries) == 0:
+            d_list = np.full(self.order, True, dtype=bool)
+        else:
+            d_list = [sym.d for sym in self.symmetries]
+            d_list = np.array(d_list, dtype=bool)
         return d_list
+
+    def complex2str(self, x):
+        if np.imag(x) >= 0.0:
+            return '{:.4f}  +  {:.4f}j'.format(np.real(x), np.imag(x))
+        elif np.imag(x) < 0.0:
+            return '{:.4f}  -  {:.4f}j'.format(np.real(x), -np.imag(x))
+
+    def print_spinor(self, sym):
+        '''
+        Temporary function for testing. Print spin rep. matrix, angle and d-label
+        '''
+
+        for row in sym.spinor_rotation:
+            s = '   '.join([self.complex2str(row[0]), self.complex2str(row[1])])
+            print(s)
+        print('angle: {:.4f}   axis: {}   d: {}'.format(np.real(sym.angle), np.round(sym.axis, 4), sym.d))
 
     def show(self, symmetries=None):
         """

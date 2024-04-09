@@ -261,7 +261,13 @@ do not hesitate to contact the author:
     help=("Threshold to compare translational parts of symmetries."
           "Default: 1e-5"
           )
-)
+    )
+@click.option("-sg",  # temporal, for testing FPLO interface
+    type=int,
+    default=None,
+    help=("Temporal number of space group. To test FPLO interface"
+          )
+    )
 def cli(
     ecut,
     fwav,
@@ -290,7 +296,8 @@ def cli(
     config,
     searchcell,
     correct_ecut0,
-    trans_thresh
+    trans_thresh,
+    sg
 ):
     """
     Defines the "irrep" command-line tool interface.
@@ -362,6 +369,7 @@ def cli(
         refUC = refuc,
         shiftUC = shiftuc,
         search_cell = searchcell,
+        sg=sg
     )
 
     json_data ["spacegroup"] = bandstr.spacegroup.show(symmetries=symmetries)

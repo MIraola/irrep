@@ -135,6 +135,7 @@ class BandStructure:
         shiftUC = None,
         search_cell = False,
         trans_thresh=1e-5,
+        sg=1  # temporal, to test FPLO interface
     ):
 
         code = code.lower()
@@ -152,6 +153,7 @@ class BandStructure:
             self.spinor = spinor
             parser = ParserVasp(fPOS, fWAV, onlysym)
             self.Lattice, positions, typat = parser.parse_poscar()
+            cell = (self.Lattice, positions, typat)
             if not onlysym:
                 NK, NBin, self.Ecut0, lattice = parser.parse_header()
                 if not np.allclose(self.Lattice, lattice):
@@ -166,6 +168,7 @@ class BandStructure:
             self.Lattice = parser.rprimd
             positions = parser.xred
             typat = parser.typat
+            cell = (self.Lattice, positions, typat)
             self.Ecut0 = parser.ecut
             EF_in = parser.efermi
             NBin = parser.nband
@@ -176,6 +179,7 @@ class BandStructure:
             parser = ParserEspresso(prefix)
             self.spinor = parser.spinor
             self.Lattice, positions, typat = parser.parse_lattice()
+            cell = (self.Lattice, positions, typat)
             spinpol, self.Ecut0, EF_in, NK, NBin_list = parser.parse_header()
 
             # Set NBin
@@ -205,10 +209,13 @@ class BandStructure:
             parser = ParserW90(prefix)
             NK, NBin, self.spinor, EF_in = parser.parse_header()
             self.Lattice, positions, typat, kpred = parser.parse_lattice()
+            cell = (self.Lattice, positions, typat)
             Energies = parser.parse_energies()
 
         elif code == "fplo":
             # To do: add calls to class for parsing FPLO input
+            cell = None
+            self.spinor = True  # temporary. Parse it from input
             pass
 
 
@@ -216,12 +223,14 @@ class BandStructure:
             raise RuntimeError("Unknown/unsupported code :{}".format(code))
 
         self.spacegroup = SpaceGroup(
-                              cell=(self.Lattice, positions, typat),
+                              cell=cell,
                               spinor=self.spinor,
                               refUC=refUC,
                               shiftUC=shiftUC,
                               search_cell=search_cell,
-                              trans_thresh=trans_thresh)
+                              trans_thresh=trans_thresh,
+                              sg=sg  # temporal, to test FPLO interface
+                              )
         if onlysym:
             return
 

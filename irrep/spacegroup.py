@@ -94,9 +94,10 @@ class SymmetryOperation():
             if iangle == -6:
                 iangle = 6
             self.angle = iangle * pi / 6
+            self.angle /= np.pi
             self.angle_str = self.get_angle_str()
             self.spinor = spinor
-            self.spinor_rotation = expm(-0.5j * self.angle *
+            self.spinor_rotation = expm(-0.5j * self.angle * np.pi *
                                         np.einsum('i,ijk->jk', self.axis, pauli_sigma))
             self.sign = 1  # May be changed later externally
         
@@ -125,7 +126,7 @@ class SymmetryOperation():
         """
         accur = 1e-4
         def is_close_int(x): return abs((x + 0.5) % 1 - 0.5) < accur
-        api = self.angle / np.pi
+        api = self.angle
         if abs(api) < 0.01:
             return " 0 "
         for n in 1, 2, 3, 4, 6:
@@ -667,6 +668,8 @@ class SpaceGroup():
         elif spin_rep is not None and inversion_list is not None:
 
             self.order = len(spin_rep)  # new attribute
+            self.primary_axis = None
+            self.secondary_axis = None
 
             # Identify angles and axes. Not in SymmetryOperation 
             # because we need angles of all syms
@@ -674,9 +677,98 @@ class SpaceGroup():
             for S in range(spin_rep):
 
                 angle, axis, d = self.identify_from_spinrep(S)
-                self.symmetries.append(SymmetryOperation(S=S, angle=angle, axis=axis, d=d, is_inv=is_inv)
+                self.symmetries.append(SymmetryOperation(S=S, angle=angle, axis=axis, d=d, is_inv=True))  # to do: change is_inv to parsed from input file
 
-            # Correct identification of dihedral symmetries
+            # Identify primary axis
+            if self.order == 1:  # group P1
+                self.primary_axis = [0,0,1]
+            else:
+                for m in (6, 4, 3, 2):
+                    inds = np.where(np.isclose(self.angles, 2./m, rtol=0.0, atol=1e-4))[0]
+                    if len(inds) > 0:
+                        i = inds[np.where(self.d_list[inds] == False)[0][0]]
+                        self.primary_order = m
+                        self.primary_axis = self.axes[i]
+                        alpha = spin_rep[i]
+                        break
+                        # Note: for tetrahedral groups (cubic without 4-fold)
+                        # the 3-fold axis has beed identified as primary
+                        # This will be fixed later
+        
+            # Set primary direction as axis for identity
+            inds_identity = np.where(np.isclose(self.angles, 0.0))[0]
+            for isym in inds_identity:
+                self.symmetries[isym].axis = self.primary_axis
+
+            # Correct identification of dihedral syms
+            inds_dihedral = np.where(np.all(np.isclose(self.axes, self.primary_axis), axis=1) == False)[0]
+
+            if len(inds_dihedral) > 0:
+
+                # Fix primary axis for tetrahedral groups
+                mult = np.dot(self.axes[inds_dihedral], self.primary_axis)
+                if not np.allclose(mult, 0.0) and self.primary_order == 3:
+                    # Some dihedral axes not perpendicular to
+                    # primary axis -> cubic group
+                    inds = np.where(np.isclose(self.angles, 1.0, rtol=0.0, atol=1e-4))[0]
+                    i = inds[np.where(self.d_list[inds] == False)[0][0]]
+                    self.secondary_axis, beta_0 = self.primary_axis, alpha
+                    self.primary_axis, alpha = self.axes[i], spin_rep[i]
+                    self.primary_order = 2
+
+                if self.primary_order != 2:
+
+                    i = inds_dihedral[np.where(self.d_list[inds_dihedral] == False)[0][0]]
+                    beta_0 = spin_rep[i]
+                    self.secondary_axis = self.axes[i]
+
+                    num_dihedral = self.primary_order * 2
+                    for i in range(num_dihedral):
+                        beta_m = np.linalg.matrix_power(alpha, m).dot(beta_0)
+                        isym = np.where(np.isclose(spin_rep, beta_m, rtol=0, atol=1e-4).all(axis=1).all(axis=1))[0][0]
+                        if self._need_reverse:
+                            self.symmetries[isym].d = not self.symmetries[isym].d
+                            self.symmetries[isym].axis *= - 1.0
+
+
+    def _need_reverse(self, primary_order, m, d):
+        '''
+        Check if we need to reverse axis of dihedral symmetry and change 
+        its "d label"
+        '''
+
+        need_reverse = False
+        if primary_order == 6:
+            if m % 4 in (0, 1) and d:
+                need_reverse = True
+            elif m % 4 not in (0, 1) and not d:
+                need_reverse = True
+        
+        elif primary_order == 4:
+            if m < 4 and d:
+                need_reverse = True
+            elif m > 4 and not d:
+                need_reverse = True
+        
+        elif primary_order == 3:
+            if m % 2 == 0 and d:
+                need_reverse = True
+            elif m % 2 != 0 and not d:
+                need_reverse = True
+        
+        return need_reverse
+
+
+            
+
+            
+
+
+
+
+        
+
+
 
 
     def identify_from_spinrep(self, S):
@@ -720,19 +812,23 @@ class SpaceGroup():
 
         return angle/np.pi, axis, d
 
-
-
-
-
     @property
     def angles(self):
         angles_list = [sym.angle for sym in self.symmetries]
+        angles_list = np.array(angles_list)
         return angles_list
 
     @property
     def axes(self):
         axes_list = [sym.axis for sym in self.symmetries]
+        axes_list = np.array(axes_list)
         return axes_list
+
+    @property
+    def d_list(self):
+        d_list = [sym.d for sym in self.symmetries]
+        d_list = np.array(d_list, dtype=bool)
+        return d_list
 
     def show(self, symmetries=None):
         """

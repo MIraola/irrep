@@ -320,9 +320,6 @@ class SymmetryOperation():
                     [parse_row_transform(r) for r in np.transpose(np.linalg.inv(R))]
                     )+ "]"
                 
-
-
-
         print("\n".join(rotstr))
         print("\n\n",kstring)
 
@@ -448,6 +445,33 @@ class SymmetryOperation():
         return ("   ".join(" ".join("{0:2d}".format(x) for x in r) for r in R) + "     " + " ".join("{0:10.6f}".format(x) for x in t) + (
             ("      " + "    ".join("  ".join("{0:10.6f}".format(x) for x in (X.real, X.imag)) for X in S.reshape(-1))) if S is not None else "") + "\n")
 
+    def json_dict(self, refUC=np.eye(3), shiftUC=np.zeros(3)):
+        '''
+        Prepare dictionary with info of symmetry to save in JSON
+
+        Returns
+        -------
+        d : dict
+            Dictionary with info about symmetry
+        '''
+
+        d = {}
+        d["axis"]  = self.axis
+        d["angle_str"] = self.angle_str
+        d["angle_pi"] = self.angle/np.pi
+        d["inversion"] = self.inversion
+        d["sign"] = self.sign
+
+        d["rotation_matrix"] = self.rotation
+        d["translation"] = self.translation
+
+        R = self.rotation_refUC(refUC)
+        t = self.translation_refUC(refUC, shiftUC)
+        d["rotation_matrix_refUC"] = R
+        d["translation_refUC"]= t
+
+        return d
+
 
 class SpaceGroup():
     """
@@ -553,16 +577,6 @@ class SpaceGroup():
             centrosymmetric groups they adopt origin choice 1 of ITA, rather 
             than choice 2 (BCS).
         """
-        print('')
-        print('\n ----------INFORMATION ABOUT THE UNIT CELL----------- \n')
-        print('')
-        print(
-            'Primitive vectors : \n',
-            cell[0],
-            '\n Atomic positions: \n',
-            cell[1],
-            '\n Atom type indices: \n',
-            cell[2])
         dataset = spglib.get_symmetry_dataset(cell)
         symmetries = [
             SymmetryOperation(
@@ -578,7 +592,6 @@ class SpaceGroup():
         return (symmetries, 
                 dataset['international'],
                 dataset['number'], 
-                cell[0], 
                 dataset['transformation_matrix'],
                 dataset['origin_shift']
                 )
@@ -596,18 +609,19 @@ class SpaceGroup():
             sg=None  # temporal, to test FPLO interface
             ):
         self.spinor = spinor
-
         if cell is not None:
+            self.Lattice = cell[0]
+            self.positions = cell[1]
+            self.typat = cell[2]
             (self.symmetries, 
              self.name, 
              self.number, 
-             self.Lattice, 
              refUC_tmp, 
              shiftUC_tmp) = self._findsym(cell)
             self.RecLattice = np.array([np.cross(self.Lattice[(i + 1) %
                                                               3], self.Lattice[(i + 2) %
                                                                                3]) for i in range(3)]) * 2 * np.pi / np.linalg.det(self.Lattice)
-            print(" Reciprocal lattice:\n", self.RecLattice)
+            self.order = len(self.symmetries)
 
             # Determine refUC and shiftUC according to entries in CLI
             self.symmetries_tables = IrrepTable(self.number, self.spinor).symmetries
@@ -651,20 +665,6 @@ class SpaceGroup():
                            "tables. If you want to achieve the same cell as in "
                            "tables, try not specifying refUC and shiftUC."))
                     pass
-
-            # Print transformation and basis vectors in both settings
-            refUC_print = self.refUC.T  # print following convention in paper
-            print("\nThe cell transformation is given by: \n"
-                  + "        | {} |\n".format("".join(["{:8.4f}".format(el) for el in refUC_print[0]]))
-                  + "refUC = | {} |    shiftUC = {}\n".format("".join(["{:8.4f}".format(el) for el in refUC_print[1]]), np.round(self.shiftUC, 5))
-                  + "        | {} |\n".format("".join(["{:8.4f}".format(el) for el in refUC_print[2]]))
-                  )
-            print("Lattice vectors of DFT (a) and reference (c) cells:")
-            Lattice_conv = self.refUC.T.dot(self.Lattice)
-            for i in range(3):
-                l_str = "a({:1d})=[{} ]".format(i, "".join("{:8.4f}".format(x) for x in self.Lattice[i]))
-                r_str = "c({:1d})=[{} ]".format(i, "".join("{:8.4f}".format(x) for x in Lattice_conv[i]))
-                print("    ".join((l_str,r_str)))
         
         # Lines for FPLO
         #elif spin_rep is not None and inversion_list is not None:
@@ -857,6 +857,39 @@ class SpaceGroup():
             print(s)
         print('angle: {:.4f}   axis: {}   d: {}'.format(np.real(sym.angle), np.round(sym.axis, 4), sym.d))
 
+    def json(self, symmetries=None):
+        '''
+        Prepare dictionary with info of space group to save in JSON
+
+        Returns
+        -------
+        d : dict
+            Dictionary with info about space group
+        '''
+
+        d = {}
+        print(self.refUC, self.shiftUC)
+
+        if (np.allclose(self.refUC, np.eye(3)) and
+            np.allclose(self.shiftUC, np.zeros(3))):
+            cells_match = True
+        else:
+            cells_match = False
+
+        d = {"name": self.name,
+             "number": self.number,
+             "spinor": self.spinor,
+             "num_symmetries": self.order,
+             "cells_match": cells_match,
+             "symmetries": {}
+             }
+
+        for sym in self.symmetries:
+            if symmetries is None or sym.ind in symmetries:
+                d["symmetries"][sym.ind] = sym.json_dict(self.refUC, self.shiftUC)
+
+        return d
+
     def show(self, symmetries=None):
         """
         Print description of space-group and symmetry operations.
@@ -873,14 +906,7 @@ class SpaceGroup():
         json_data : `json` object
             Object with output structured in `json` format.
         """
-        print('')
-        print("\n ---------- INFORMATION ABOUT THE SPACE GROUP ---------- \n")
-        print('')
-        print("Space group {0} (# {1}) has {2} symmetry operations  ".format(
-            self.name,
-            self.number, 
-            len(self.symmetries))
-            )
+
 
         if (not np.allclose(self.refUC, np.eye(3)) or
             not np.allclose(self.shiftUC, np.zeros(3))):
@@ -895,22 +921,52 @@ class SpaceGroup():
                      "cells_match": not write_ref,
                      "symmetries": {}
                      }
+        print()
+        print('\n ---------- SPACE GROUP ----------- \n')
+        print()
+        print('Space group: {} (# {})'.format(self.name, self.number))
+        print('Number of symmetries: {} (mod. lattice translations)'.format(self.order))
+        refUC_print = self.refUC.T  # print following convention in paper
+        print("\nThe transformation from the DFT cell to the reference cell of tables is given by: \n"
+              + "        | {} |\n".format("".join(["{:8.4f}".format(el) for el in refUC_print[0]]))
+              + "refUC = | {} |    shiftUC = {}\n".format("".join(["{:8.4f}".format(el) for el in refUC_print[1]]), np.round(self.shiftUC, 5))
+              + "        | {} |\n".format("".join(["{:8.4f}".format(el) for el in refUC_print[2]]))
+              )
 
         for symop in self.symmetries:
             if symmetries is None or symop.ind in symmetries:
                 json_data["symmetries"][symop.ind]=symop.show(refUC=self.refUC, shiftUC=self.shiftUC)
 
+        print('')
+        print("\n ---------- CRYSTAL STRUCTURE ---------- \n")
+        print('')
+
+        # Print cell vectors in DFT and reference cells
+        vecs_refUC = np.dot(self.Lattice, self.refUC).T
+        print('Cell vectors in angstroms')
+        print('{:^32}|{:^32}'.format('Vectors of DFT cell', 'Vectors of REF. cell'))
+        for i in range(3):
+            vec1 = self.Lattice[i]
+            vec2 = vecs_refUC[i]
+            s = 'a{:1d} = {:7.4f}  {:7.4f}  {:7.4f}  '.format(i, vec1[0], vec1[1], vec1[2])
+            s += '|  '
+            s += 'a{:1d} = {:7.4f}  {:7.4f}  {:7.4f}'.format(i, vec2[0], vec2[1], vec2[2])
+            print(s)
+        print()
+
+        # Print atomic positions
+        print('Atomic positions in direct coordinates')
+        print('{:^} | {:^25} | {:^25}'.format('Atom type', 'Position in DFT cell', 'Position in REF cell'))
+        positions_refUC = self.positions.dot(np.linalg.inv(self.refUC.T))
+        for itype, pos1, pos2 in zip(self.typat, self.positions, positions_refUC):
+            s = '{:^9d}'.format(itype)
+            s += ' | '
+            s += '  '.join(['{:7.4f}'.format(x) for x in pos1])
+            s += ' | '
+            s += '  '.join(['{:7.4f}'.format(x) for x in pos2])
+            print(s)
+
         return json_data
-
-
-#  def show2(self,refUC=None,shiftUC=np.zeros(3)):
-#    print('')
-#    print("\n ---------- INFORMATION ABOUT THE SPACE GROUP ---------- \n")
-#    print('')
-#    print ("Space group # {0} has {1} symmetry operations  ".format(self.number,len(self.symmetries)))
-#    for symop in self.symmetries:
-#       symop.show2(refUC=refUC,shiftUC=shiftUC)
-
 
     def write_trace(self):
         """

@@ -351,7 +351,6 @@ def cli(
     except Exception as err:
         print(err)
         preline = ""
-    json_data = {}
 
     bandstr = BandStructure(
         fWAV=fwav,
@@ -369,10 +368,10 @@ def cli(
         refUC = refuc,
         shiftUC = shiftuc,
         search_cell = searchcell,
+        degen_thresh=degenthresh,
         sg=sg
     )
 
-    json_data ["spacegroup"] = bandstr.spacegroup.show(symmetries=symmetries)
 
     if onlysym:
         exit()
@@ -382,20 +381,40 @@ def cli(
                 bandstr.spacegroup.str()
                 )
 
+    # Identify irreps. If kpnames wasn't set, all will be labelled as None
+    bandstr.identify_irreps(kpnames)
+
+    # Temporary, until we make it valid for isymsep
+    bandstr.write_characters2()
+
+    # Temporary, until we make it valid for isymsep
+    json_data = {}
+    json_data ["spacegroup"] = bandstr.spacegroup.json(symmetries=symmetries)
+    json_bandstr = bandstr.json()
+    json_data['characters_and_irreps'] = [{"subspace": json_bandstr}]
+#    dumpfn(json_data,"irrep-output.json",indent=4)
+
     subbands = {(): bandstr}
 
     if isymsep is not None:
         json_data["separated by symmetry"]=True
         json_data["separating symmetries"]=isymsep
+        tmp_subbands = {}
         for isym in isymsep:
             print("Separating by symmetry operation # ", isym)
-            subbands = {
-                tuple(list(s_old) + [s_new]): sub
-                for s_old, bands in subbands.items()
-                for s_new, sub in bands.Separate(
-                    isym, degen_thresh=degenthresh, groupKramers=groupkramers
-                ).items()
-            }
+            for s_old, bs in subbands.items():
+                separated = bs.Separate(isym, degen_thresh=degenthresh, groupKramers=groupkramers)
+                for s_new, bs_separated in separated.items():
+                    tmp_subbands[tuple(list(s_old) + [s_new])] = bs_separated
+            subbands = tmp_subbands
+
+            #subbands = {
+            #    tuple(list(s_old) + [s_new]): sub
+            #    for s_old, bands in subbands.items()
+            #    for s_new, sub in bands.Separate(
+            #        isym, degen_thresh=degenthresh, groupKramers=groupkramers
+            #    ).items()
+            #}
     else :
         json_data["separated by symmetry"]=False
         
@@ -442,16 +461,11 @@ def cli(
                 ),
             )
         plotfile=None # being implemented, not finished yet...
-        characters = sub.write_characters(
-            degen_thresh=degenthresh,
-            symmetries=symmetries,
-            kpnames=kpnames,
-            preline=preline,
-            plotFile=plotfile,
-        )
-        json_data["characters_and_irreps"].append( {"symmetry_eigenvalues":k , "subspace": characters  }  )
-#        json_data["characters_and_irreps"].append( [k ,characters  ]  )
+        sub.write_characters2()
+        json_data["characters_and_irreps"].append({"symmetry_eigenvalues":k , "subspace": sub.json(symmetries)})
 
+    dumpfn(json_data,"irrep-output.json",indent=4)
+    exit()
     if plotbands:
         json_data["characters_and_irreps"] = {}
         print("plotbands = True --> writing bands")

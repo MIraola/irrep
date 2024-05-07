@@ -704,6 +704,9 @@ class SpaceGroup():
                         # the 3-fold axis has beed identified as primary
                         # This will be fixed later
         
+            print('alpha:')
+            print(alpha)
+
             # Set primary direction as axis for identity
             inds_identity = np.where(np.isclose(self.angles, 0.0))[0]
             for isym in inds_identity:
@@ -731,13 +734,21 @@ class SpaceGroup():
                     beta_0 = spin_rep[i]
                     self.secondary_axis = self.axes[i]
 
+                    print('beta0:')
+                    print(beta_0)
+
                     num_dihedral = self.primary_order * 2
-                    for i in range(num_dihedral):
+                    for m in range(num_dihedral):
                         beta_m = np.linalg.matrix_power(alpha, m).dot(beta_0)
                         isym = np.where(np.isclose(spin_rep, beta_m, rtol=0, atol=1e-4).all(axis=1).all(axis=1))[0][0]
-                        if self._need_reverse:
+                        if self._need_reverse(m, self.symmetries[isym].d):
                             self.symmetries[isym].d = not self.symmetries[isym].d
                             self.symmetries[isym].axis *= - 1.0
+
+                        #print()
+                        #print('m:',m)
+                        #print(beta_m)
+                        #print(self.symmetries[isym].d, self.symmetries[isym].axis)
             
             # Test printing
             for sym in self.symmetries:
@@ -745,26 +756,26 @@ class SpaceGroup():
                 self.print_spinor(sym)
 
 
-    def _need_reverse(self, primary_order, m, d):
+    def _need_reverse(self, m, d):
         '''
         Check if we need to reverse axis of dihedral symmetry and change 
         its "d label"
         '''
 
         need_reverse = False
-        if primary_order == 6:
+        if self.primary_order == 6:
             if m % 4 in (0, 1) and d:
                 need_reverse = True
             elif m % 4 not in (0, 1) and not d:
                 need_reverse = True
         
-        elif primary_order == 4:
+        elif self.primary_order == 4:
             if m < 4 and d:
                 need_reverse = True
             elif m > 4 and not d:
                 need_reverse = True
         
-        elif primary_order == 3:
+        elif self.primary_order == 3:
             if m % 2 == 0 and d:
                 need_reverse = True
             elif m % 2 != 0 and not d:

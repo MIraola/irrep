@@ -706,33 +706,27 @@ class SpaceGroup():
                                                          is_inv=True, Lattice=np.eye(3, dtype=float), trans=np.zeros(3)  # adapt when getting FPLO version
                                                          ))  # to do: change is_inv to parsed from input file
 
-            # Identify primary axis
-            if self.order == 1:  # group P1
-                self.primary_axis = [0,0,1]
-            else:
-                for m in (6, 4, 3, 2):
-                    inds = np.where(np.isclose(self.angles, 2./m, rtol=0.0, atol=1e-4))[0]
-                    if len(inds) > 0:
-                        i = inds[np.where(self.d_list[inds] == False)[0][0]]
-                        self.primary_order = m
-                        self.primary_axis = self.axes[i]
-                        alpha = self.symmetries[i].spinor_rotation
-                        break
-            self.secondary_axis = False
-
-            # Set primary direction as axis for identity
-            inds_identity = np.where(np.isclose(self.angles, 0.0))[0]
-            for isym in inds_identity:
-                self.symmetries[isym].axis = self.primary_axis
+            # Identify primary axis and order of primary and secondary axes
+            self.primary_axis, self.primary_order, self.secondary_order = self.identify_crystal_directions()
 
             # Fix identification of dihedral axes
-            inds_dihedral = np.where(np.all(np.isclose(self.axes, self.primary_axis), axis=1) == False)[0]
-            if len(inds_dihedral) > 0:
-                self.fix_dihedral_axes(inds_dihedral)
+            if self.primary_order > 2 and self.secondary_order == 2:
+                inds_twofold = np.where(np.isclose(self.angles, 1.0, rtol=0.0, atol=1e-4))[0]
+                # Discard symmetries with same axis as the primary (tetrag and hexag)
+                inds_twofold = inds_twofold[np.where(np.all(np.isclose(self.axes[inds_twofold], self.primary_axis), axis=1) == False)[0]]
+                products = np.dot(self.axes[inds_twofold], self.primary_axis)
+                print(products)
+                if np.allclose(products, 0.0):
+                    self.fix_dihedral_axes(inds_twofold)
+            
+            print('primary axis:', self.primary_axis)
+            print('primary order:', self.primary_order)
+            print('secondary order:', self.secondary_order)
 
             # Place primary axis along same direction as in tables
             #symmetries_tables = IrrepTable(self.number, self.spinor).symmetries
             #spinrep_tables = [sym.S for sym in symmetries_tables]
+
             
             # Test printing
             for i,sym in enumerate(self.symmetries):
@@ -740,9 +734,46 @@ class SpaceGroup():
                 print(np.allclose(spin_rep[i], sym.spinor_rotation))
                 self.print_spinor(sym)
 
+    def identify_crystal_directions(self):
+
+        if self.order == 1:  # group P1
+            primary_axis = [0,0,1]
+            primary_order = 1
+            secondary_order = 1
+
+        else:
+
+            # Identify axis of highest order
+            for m in (6, 4, 3, 2):
+                inds = np.where(np.isclose(self.angles, 2./m, rtol=0.0, atol=1e-4))[0]
+                if len(inds) > 0:
+                    isym = inds[np.where(self.d_list[inds] == False)[0][0]]
+                    primary_order = m
+                    primary_axis = self.axes[isym]
+                    break
+
+            # Search symmetry of next lower order
+            for m in range(primary_order-1, 0, -1):
+                inds = np.where(np.isclose(self.angles, 2./m, rtol=0.0, atol=1e-4))[0]
+                # Discard symmetries with same axis as the primary (case of hexagonal)
+                inds = inds[np.where(np.all(np.isclose(self.axes[inds], primary_axis), axis=1) == False)[0]]
+                if len(inds) > 0:
+                    secondary_order = m
+                    break
+
+            # If the group is tetrahedral, swap primary and secondary orders
+            if primary_order == 3 and secondary_order == 2:
+                inds_twofold = np.where(np.isclose(self.angles, 1.0, rtol=0.0, atol=1e-4))[0]
+                products = np.dot(self.axes[inds_twofold], primary_axis)
+                if not np.allclose(products, 0.0):
+                    primary_order, secondary_order = secondary_order, primary_order
+                    isym = inds_twofold[np.where(self.d_list[inds_twofold] == False)[0][0]]
+                    primary_axis = self.axes[isym]
+
+            return primary_axis, primary_order, secondary_order
+
 
     def fix_dihedral_axes(self, inds_dihedral):
-
 
         inds_primary = np.where(np.isclose(self.angles, 2./self.primary_order, rtol=0.0, atol=1e-4))[0]
         isym = inds_primary[np.where(self.d_list[inds_primary] == False)[0][0]]
@@ -751,35 +782,24 @@ class SpaceGroup():
         print('alpha:')
         print(alpha)
 
-        if len(inds_dihedral) > 0:
+        # Pick a dihedral 2-fold rotation
+        isym = inds_dihedral[np.where(self.d_list[inds_dihedral] == False)[0][0]]
+        beta_0 = self.symmetries[isym].spinor_rotation
 
-            # Fix primary axis for tetrahedral groups
-            # Some dihedral axes not perpendicular to
-            # primary axis -> cubic group
-            mult = np.dot(self.axes[inds_dihedral], self.primary_axis)
-            if not np.allclose(mult, 0.0) and self.primary_order == 3:
-                inds = np.where(np.isclose(self.angles, 1.0, rtol=0.0, atol=1e-4))[0]
-                i = inds[np.where(self.d_list[inds] == False)[0][0]]
-                self.secondary_axis, beta_0 = self.primary_axis, alpha
-                self.primary_axis, alpha = self.axes[i], self.symmetries[i].spinor_rotation
-                self.primary_order = 2
+        print('beta0:')
+        print(beta_0)
 
-            if self.primary_order != 2:
+        # Generate the rest of dihedral rotations as alpha^m.beta_0
+        num_dihedral = self.primary_order * 2
+        for m in range(num_dihedral):
+            beta_m = np.linalg.matrix_power(alpha, m).dot(beta_0)
+            isym = np.where(np.isclose(self.spin_rep, beta_m, rtol=0, atol=1e-4).all(axis=1).all(axis=1))[0][0]
 
-                i = inds_dihedral[np.where(self.d_list[inds_dihedral] == False)[0][0]]
-                beta_0 = self.symmetries[i].spinor_rotation
-                self.secondary_axis = self.axes[i]
+            # Impose convention to label +2pi rotations
+            if self._need_reverse(m, self.symmetries[isym].d):
+                self.symmetries[isym].d = not self.symmetries[isym].d
+                self.symmetries[isym].axis *= - 1.0
 
-                print('beta0:')
-                print(beta_0)
-
-                num_dihedral = self.primary_order * 2
-                for m in range(num_dihedral):
-                    beta_m = np.linalg.matrix_power(alpha, m).dot(beta_0)
-                    isym = np.where(np.isclose(self.spin_rep, beta_m, rtol=0, atol=1e-4).all(axis=1).all(axis=1))[0][0]
-                    if self._need_reverse(m, self.symmetries[isym].d):
-                        self.symmetries[isym].d = not self.symmetries[isym].d
-                        self.symmetries[isym].axis *= - 1.0
 
     def rotate_symelements(angle, n, axes):
         '''

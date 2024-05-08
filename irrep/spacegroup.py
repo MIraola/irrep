@@ -82,8 +82,13 @@ class SymmetryOperation():
         to that in tables.
     """
 
-    def __init__(self, rot=None, trans=None, Lattice=None, ind=-1, spinor=True, S=None, is_inv=None, angle=None, axis=None, d=None):
-        if S is None:
+    def __init__(self,
+                 rot=None,  # args for Vasp, Abinit, QE, W90
+                 trans=None, Lattice=None, ind=-1, spinor=True,  # arg all code
+                 is_inv=None, angle=None, axis=None, d=None):  # args for FPLO
+
+        # Case of Vasp, Abinit, QE and W90
+        if rot is not None:
             self.ind = ind
             self.rotation = rot
             self.Lattice = Lattice
@@ -97,17 +102,17 @@ class SymmetryOperation():
             self.angle /= np.pi
             self.angle_str = self.get_angle_str()
             self.spinor = spinor
-            self.spinor_rotation = expm(-0.5j * self.angle * np.pi *
-                                        np.einsum('i,ijk->jk', self.axis, pauli_sigma))
+            self.spinor_rotation = self.matrix_spinrep()
             self.sign = 1  # May be changed later externally
         
-        else:  # FPLO case, S is the spin representation matrix
-            self.spinor_rotation = S
+        # Case of FPLO
+        else:
             self.angle = angle
             self.axis = axis
             self.d = d
             self.inversion = is_inv
             self.ind = ind
+            self.spinor_rotation = self.matrix_spinrep()
 
 
 
@@ -472,6 +477,13 @@ class SymmetryOperation():
 
         return d
 
+    def matrix_spinrep(self):
+        sigma_n = np.einsum('ijk,i->jk', pauli_sigma, self.axis)
+        S = expm(-0.5j*np.pi*self.angle*sigma_n)
+        if self.d:
+            S *= -1.0
+        return S
+
 
 class SpaceGroup():
     """
@@ -608,7 +620,10 @@ class SpaceGroup():
             inversion_list=None,
             sg=None  # temporal, to test FPLO interface
             ):
+
         self.spinor = spinor
+
+        # The case for Vasp, Abinit, QE and W90
         if cell is not None:
             self.Lattice = cell[0]
             self.positions = cell[1]
@@ -666,8 +681,7 @@ class SpaceGroup():
                            "tables, try not specifying refUC and shiftUC."))
                     pass
         
-        # Lines for FPLO
-        #elif spin_rep is not None and inversion_list is not None:
+        # The case for FPLO: spin_rep, inversion_list and translation_list read from input
         elif sg is not None:
 
             # Temporarily, import spin rep from tables to test FPLO
@@ -675,6 +689,7 @@ class SpaceGroup():
             spin_rep = [sym.S for sym in irreptable.symmetries]
             spin_rep += [-S for S in spin_rep]  # add +2pi operations
             spin_rep = np.array(spin_rep, dtype=complex)
+            # end of temporary lines
 
             self.order = len(spin_rep)  # new attribute
             self.primary_axis = None
@@ -686,7 +701,9 @@ class SpaceGroup():
             for isym, S in enumerate(spin_rep):
 
                 angle, axis, d = self.identify_from_spinrep(S)
-                self.symmetries.append(SymmetryOperation(S=S, angle=angle, axis=axis, d=d, is_inv=True, ind=isym))  # to do: change is_inv to parsed from input file
+                self.symmetries.append(SymmetryOperation(angle=angle, axis=axis, d=d, ind=isym,
+                                                         is_inv=True, Lattice=np.eye(3, dtype=float), trans=np.zeros(3)  # adapt when getting FPLO version
+                                                         ))  # to do: change is_inv to parsed from input file
 
             # Identify primary axis
             if self.order == 1:  # group P1
@@ -718,10 +735,10 @@ class SpaceGroup():
             if len(inds_dihedral) > 0:
 
                 # Fix primary axis for tetrahedral groups
+                # Some dihedral axes not perpendicular to
+                # primary axis -> cubic group
                 mult = np.dot(self.axes[inds_dihedral], self.primary_axis)
                 if not np.allclose(mult, 0.0) and self.primary_order == 3:
-                    # Some dihedral axes not perpendicular to
-                    # primary axis -> cubic group
                     inds = np.where(np.isclose(self.angles, 1.0, rtol=0.0, atol=1e-4))[0]
                     i = inds[np.where(self.d_list[inds] == False)[0][0]]
                     self.secondary_axis, beta_0 = self.primary_axis, alpha
@@ -751,8 +768,9 @@ class SpaceGroup():
                         #print(self.symmetries[isym].d, self.symmetries[isym].axis)
             
             # Test printing
-            for sym in self.symmetries:
+            for i,sym in enumerate(self.symmetries):
                 print('\n---- SYM {} ----\n'.format(sym.ind))
+                print(np.allclose(spin_rep[i], sym.spinor_rotation))
                 self.print_spinor(sym)
 
 

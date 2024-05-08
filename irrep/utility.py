@@ -18,6 +18,7 @@
 
 import numpy as np
 from scipy import constants
+from scipy.linalg import expm
 import fortio
 
 BOHR = constants.physical_constants['Bohr radius'][0] / constants.angstrom
@@ -231,3 +232,15 @@ def split(l):
         return l.split(":")
     else:
         return l.split()
+
+def matrix_vector_rep(angle, axis):
+    '''
+    Creates the matrix that transforms cartesian vectors into another
+    orthogonal frame. Vectors transform as rows, coefficients as columns.
+    Formula taken from Eq.(2.22) of Hegert's book
+    '''
+
+    Z = np.array([[0.0, -axis[2], axis[1]],
+                  [axis[2], 0.0, -axis[0]],
+                  [-axis[1], axis[0], 0.0]])
+    return expm(angle*Z)

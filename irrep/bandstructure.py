@@ -230,7 +230,7 @@ class BandStructure:
                               shiftUC=shiftUC,
                               search_cell=search_cell,
                               trans_thresh=trans_thresh,
-                              sg=sg  # temporal, to test FPLO interface
+                              sg=sg  # temporal, to test FPLO interface, later pass spin_rep, d_list, inv_list, translations
                               )
         if onlysym:
             return

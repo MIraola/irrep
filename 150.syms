@@ -1,0 +1,83 @@
+Warning: transformation to the convenctional unit cell will not be calculated, nor its validity checked (if given). See the description of flag -searchcell on:
+irrep --help
+Warning: -kpnames not specified. Only traces of symmetry operations will be calculated. Remember that -kpnames must be specified to identify irreps
+'NoneType' object has no attribute 'split'
+Reading symmetries from tables
+alpha:
+[[0.50000907+0.86602017j 0.        +0.j        ]
+ [0.        +0.j         0.50000907-0.86602017j]]
+beta0:
+[[ 0.        +0.j         -0.50000907-0.86602017j]
+ [ 0.50000907-0.86602017j  0.        +0.j        ]]
+
+---- SYM 0 ----
+
+1.0000  +  0.0000j   0.0000  +  0.0000j
+0.0000  +  0.0000j   1.0000  +  0.0000j
+angle: 0.0000   axis: [ 0.+0.j  0.+0.j -1.+0.j]   d: False
+
+---- SYM 1 ----
+
+0.5000  +  0.8660j   0.0000  +  0.0000j
+0.0000  +  0.0000j   0.5000  -  0.8660j
+angle: 0.6667   axis: [ 0.+0.j  0.+0.j -1.+0.j]   d: False
+
+---- SYM 2 ----
+
+0.5000  -  0.8660j   0.0000  +  0.0000j
+0.0000  +  0.0000j   0.5000  +  0.8660j
+angle: -0.6667   axis: [-0.+0.j -0.+0.j -1.+0.j]   d: False
+
+---- SYM 3 ----
+
+0.0000  +  0.0000j   -0.5000  -  0.8660j
+0.5000  -  0.8660j   0.0000  +  0.0000j
+angle: 1.0000   axis: [0.866+0.j 0.5  +0.j 0.   +0.j]   d: False
+
+---- SYM 4 ----
+
+0.0000  +  0.0000j   -1.0000  +  0.0000j
+1.0000  +  0.0000j   0.0000  +  0.0000j
+angle: 1.0000   axis: [ 0.-0.j -1.+0.j -0.+0.j]   d: True
+
+---- SYM 5 ----
+
+0.0000  +  0.0000j   -0.5000  +  0.8660j
+0.5000  +  0.8660j   0.0000  +  0.0000j
+angle: 1.0000   axis: [-0.866+0.j  0.5  +0.j  0.   +0.j]   d: False
+
+---- SYM 6 ----
+
+-1.0000  +  -0.0000j   -0.0000  +  -0.0000j
+-0.0000  +  -0.0000j   -1.0000  +  -0.0000j
+angle: 0.0000   axis: [ 0.+0.j  0.+0.j -1.+0.j]   d: True
+
+---- SYM 7 ----
+
+-0.5000  -  0.8660j   -0.0000  +  -0.0000j
+-0.0000  +  -0.0000j   -0.5000  +  0.8660j
+angle: 0.6667   axis: [ 0.+0.j  0.+0.j -1.+0.j]   d: True
+
+---- SYM 8 ----
+
+-0.5000  +  0.8660j   -0.0000  +  -0.0000j
+-0.0000  +  -0.0000j   -0.5000  -  0.8660j
+angle: -0.6667   axis: [-0.+0.j -0.+0.j -1.+0.j]   d: True
+
+---- SYM 9 ----
+
+-0.0000  +  -0.0000j   0.5000  +  0.8660j
+-0.5000  +  0.8660j   -0.0000  +  -0.0000j
+angle: 1.0000   axis: [ 0.866+0.j  0.5  -0.j -0.   +0.j]   d: True
+
+---- SYM 10 ----
+
+-0.0000  +  -0.0000j   1.0000  -  0.0000j
+-1.0000  +  -0.0000j   -0.0000  +  -0.0000j
+angle: 1.0000   axis: [ 0.-0.j -1.+0.j  0.-0.j]   d: False
+
+---- SYM 11 ----
+
+-0.0000  +  -0.0000j   0.5000  -  0.8660j
+-0.5000  -  0.8660j   -0.0000  +  -0.0000j
+angle: 1.0000   axis: [-0.866+0.j  0.5  -0.j -0.   +0.j]   d: True

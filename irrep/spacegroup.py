@@ -92,6 +92,7 @@ class SymmetryOperation():
             self.ind = ind
             self.rotation = rot
             self.Lattice = Lattice
+            self.d = False  # plane-wave interfaces don't need +2pi symmetries
             self.translation = trans % 1
             self.translation[1 - self.translation < 1e-5] = 0
             self.axis, self.angle, self.inversion = self._get_operation_type()
@@ -693,7 +694,7 @@ class SpaceGroup():
             spin_rep = [sym.S for sym in irreptable.symmetries]
             spin_rep += [-S for S in spin_rep]  # add +2pi operations
             spin_rep = np.array(spin_rep, dtype=complex)
-            self.order = len(spin_rep)  # new attribute
+            self.order = int(len(spin_rep)/2) if self.spinor else len(spin_rep)  # new attribute
             # end of temporary lines
 
             # Identify angles and axes. Not in SymmetryOperation 
@@ -709,20 +710,24 @@ class SpaceGroup():
             # Identify primary axis and order of primary and secondary axes
             self.primary_axis, self.primary_order, self.secondary_order = self.identify_crystal_directions()
 
+            print('primary axis:', self.primary_axis)
+            print('primary order:', self.primary_order)
+            print('secondary order:', self.secondary_order)
+
+            # Set primary direction as axis for identity
+            inds = np.where(np.isclose(self.angles, 0.0))[0]
+            for isym in inds:
+                self.symmetries[isym].axis = self.primary_axis
+
             # Fix identification of dihedral axes
             if self.primary_order > 2 and self.secondary_order == 2:
                 inds_twofold = np.where(np.isclose(self.angles, 1.0, rtol=0.0, atol=1e-4))[0]
                 # Discard symmetries with same axis as the primary (tetrag and hexag)
                 inds_twofold = inds_twofold[np.where(np.all(np.isclose(self.axes[inds_twofold], self.primary_axis), axis=1) == False)[0]]
                 products = np.dot(self.axes[inds_twofold], self.primary_axis)
-                print(products)
                 if np.allclose(products, 0.0):
                     self.fix_dihedral_axes(inds_twofold)
             
-            print('primary axis:', self.primary_axis)
-            print('primary order:', self.primary_order)
-            print('secondary order:', self.secondary_order)
-
             # Place primary axis along same direction as in tables
             #symmetries_tables = IrrepTable(self.number, self.spinor).symmetries
             #spinrep_tables = [sym.S for sym in symmetries_tables]
@@ -736,7 +741,14 @@ class SpaceGroup():
 
     def identify_crystal_directions(self):
 
-        if self.order == 1:  # group P1
+        # Group is P1 or P-1
+        identity_or_inversion = []
+        for sym in self.symmetries:
+            if np.allclose(sym.spinor_rotation, np.eye(2)) or np.allclose(sym.spinor_rotation, -np.eye(2)):
+                identity_or_inversion.append(True)
+            else:
+                identity_or_inversion.append(False)
+        if np.all(identity_or_inversion):
             primary_axis = [0,0,1]
             primary_order = 1
             secondary_order = 1
@@ -747,30 +759,39 @@ class SpaceGroup():
             for m in (6, 4, 3, 2):
                 inds = np.where(np.isclose(self.angles, 2./m, rtol=0.0, atol=1e-4))[0]
                 if len(inds) > 0:
-                    isym = inds[np.where(self.d_list[inds] == False)[0][0]]
+                    isym = inds[0]
                     primary_order = m
                     primary_axis = self.axes[isym]
                     break
 
-            # Search symmetry of next lower order
-            for m in range(primary_order-1, 0, -1):
+            # Identify order of secondary axis
+            if primary_order == 2:
+                m = 2
+            else:
+                m = primary_order - 1
+            is_monoclinic = True
+            while m > 1:
                 inds = np.where(np.isclose(self.angles, 2./m, rtol=0.0, atol=1e-4))[0]
-                # Discard symmetries with same axis as the primary (case of hexagonal)
+                # Discard lower order syms along primary axis
                 inds = inds[np.where(np.all(np.isclose(self.axes[inds], primary_axis), axis=1) == False)[0]]
                 if len(inds) > 0:
                     secondary_order = m
+                    is_monoclinic = False
                     break
+                m -= 1
+            if is_monoclinic:  # monoclinic
+                secondary_order = 1
 
             # If the group is tetrahedral, swap primary and secondary orders
             if primary_order == 3 and secondary_order == 2:
-                inds_twofold = np.where(np.isclose(self.angles, 1.0, rtol=0.0, atol=1e-4))[0]
-                products = np.dot(self.axes[inds_twofold], primary_axis)
+                inds = np.where(np.isclose(self.angles, 1.0, rtol=0.0, atol=1e-4))[0]
+                products = np.dot(self.axes[inds], primary_axis)
                 if not np.allclose(products, 0.0):
                     primary_order, secondary_order = secondary_order, primary_order
-                    isym = inds_twofold[np.where(self.d_list[inds_twofold] == False)[0][0]]
+                    isym = inds[np.where(self.d_list[inds] == False)[0][0]]
                     primary_axis = self.axes[isym]
 
-            return primary_axis, primary_order, secondary_order
+        return primary_axis, primary_order, secondary_order
 
 
     def fix_dihedral_axes(self, inds_dihedral):

@@ -1,3 +1,2 @@
 include  irreptables/tables/*.dat
 include irreptables/correptables/tables/*.dat
-include irreptables/ebr_tables/*.json

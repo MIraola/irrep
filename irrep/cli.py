@@ -11,25 +11,21 @@
 ## "IrRep" code and under terms of GNU General Public license v3 #
 ## see LICENSE file in the                                       #
 ##                                                               #
-##  Written by Stepan Tsirkin, University of Zurich.             #
-##  e-mail: stepan.tsirkin@physik.uzh.ch                         #
+##  Written by Stepan Tsirkin                                    #
+##  e-mail: stepan.tsirkin@ehu.eus                               #
 ##################################################################
 
 """
 Defines the command line interface to "irrep".
 """
 
-import sys
 import numpy as np
-import datetime
-import math
 
 import click
 from monty.serialization import dumpfn, loadfn
 
-from .spacegroup import SpaceGroup
 from .bandstructure import BandStructure
-from .utility import str2bool, str2list, short
+from .utility import sort_vectors, str2list, short, log_message
 from . import __version__ as version
 
 from .symmetry_indicators import get_si_calculation_points
@@ -130,10 +126,22 @@ do not hesitate to contact the author:
     'Only used if code is "abinit".',
 )
 @click.option(
+    "-gpaw_calc",
+    type=str,
+    help="Filename for gpaw calculator. "
+    'Only used if code is "gpaw".',
+)
+@click.option(
     "-prefix",
     type=str,
     help="Prefix used for Quantum Espresso calculations (data should be in prefix.save) or seedname of Wannier90 files. ",
 )
+@click.option(
+    "-from_sym_file",
+    type=str,
+    help="if present, the symmetry operations will be read from this file, instead of those computed by spglib",
+)
+
 @click.option(
     "-IBstart",
     type=int,
@@ -150,7 +158,7 @@ do not hesitate to contact the author:
 )
 @click.option(
     "-code",
-    type=click.Choice(["vasp", "abinit", "espresso", "wannier90"]),
+    type=click.Choice(["vasp", "abinit", "espresso", "wannier90", "gpaw"]),
     default="vasp",
     help="Set which electronic structure code to interface with. If using ABINIT, always use "
     '"istwfk=1".',
@@ -190,14 +198,28 @@ do not hesitate to contact the author:
 )
 @click.option(
     "-isymsep",
-    help="Index of the symmetry to separate the eigenstates. Works well only for norm-conserving "
-    "potentials as in ABINIT.",
+    help="Index of the symmetry to separate the eigenstates. "
+    "with new method works with any code/pseudopotential"
+    "Previously worked well only for norm-conserving potentials.",
 )
 @click.option(
     "-onlysym",
     flag_value=True,
     default=False,
     help="Only calculate the symmetry operations",
+)
+@click.option(
+    "-writesym",
+    flag_value=True,
+    default=False,
+    help="write the prefix.sym file needed for the Wannier90 sitesym calculations",
+)
+@click.option(
+    "-alat",
+    type=float,
+    default=None,
+    help="for writesym - the alat parameter. For QE, it is read from the prefix.save/data-file-schema.xml"
+    "For other codes needs to be provided. (To be honest, the .sym file is useless for other codes for now, but still ..)",
 )
 @click.option("-ZAK", flag_value=True, default=False, help="Calculate Zak phase")
 @click.option(
@@ -208,12 +230,6 @@ do not hesitate to contact the author:
     flag_value=True,
     default=False,
     help="Write gnuplottable files with all symmetry eigenvalues",
-)
-@click.option(
-    "-plotFile", 
-    type=str, 
-    help="file where bands for plotting will be written."
-    "In development...!"
 )
 @click.option("-EF", 
     type=str, 
@@ -232,8 +248,8 @@ do not hesitate to contact the author:
 @click.option(
     "-groupKramers", 
     flag_value=True, 
-    default=True, 
-    help="Group wave-functions in pairs of Kramers. Default: True."
+    default=False, 
+    help="Group wave-functions in pairs of Kramers. Default: False."
 )
 @click.option(
     "-symmetries", 
@@ -265,43 +281,45 @@ do not hesitate to contact the author:
           "Default: 1e-5"
           )
 )
-
-@click.option(
-    "-magmom",
+@click.option("-magmom",
+    type=str,
     default=None,
-    help="Path to magnetic moments file. One row per atom, three coordinates in Cartesian."
+    help=("Path to magnetic moments' file. One row per atom, three "
+          "coordinates in Cartesian.")
 )
-
-# @click.option(
-#     "-SIndicators",
-#     default=None,
-#     help="Number of occupied bands to compute the corresponding symmetry indicators."
-# )
-
-@click.option(
-    "-giveHSKpoints",
-    flag_value=True,
-    default=False,
-    help="Output the k-point coordinates in the input cell to match the tables."
+@click.option("-v",
+              count=True,
+              default=1,
+              help=("Verbosity flag. -vv: very detailed info, recommended "
+                    "when you get an error. -v (default for CLI): info about "
+                    "some decissions taken internaly through the code's "
+                    "execution, recommended when the code runs without "
+                    "errors, but the result is not what you expected. If you "
+                    "don't set this tag, you will get the basic info.")
 )
-# @click.option(
-#     "-giveSIKpoints",
-#     flag_value=True,
-#     default=False,
-#     help="Output the k-point coordinates required for the symmetry indicators."
-# )
-@click.option(
-    "-EBRs",
-    flag_value=True,
-    default=False,
-    help="Compute EBR decomposition for the calculated bands. Requires calculating irreps."
-    )
-
+@click.option("-json_file",
+                type=str,
+                default="irrep-output.json",
+                help="File to save the output in JSON format. (without "
+                    "extension, the '.json' will be added automatically)"
+)
+@click.option("--print-hs-kpoints",
+                flag_value=True,
+                default=False,
+                help="Print high-symmetry k-points in the calculation and reference cell."
+)
+@click.option("--symmetry-indicators",
+                flag_value=True,
+                default=False,
+                help="Compute symmetry indicators if they are non-trivial. "
+                    "Irreps must be identified in the process."
+)
 def cli(
     ecut,
     fwav,
     fpos,
     fwfk,
+    gpaw_calc,
     prefix,
     ibstart,
     ibend,
@@ -313,10 +331,12 @@ def cli(
     shiftuc,
     isymsep,
     onlysym,
+    writesym,
+    alat,
+    from_sym_file,
     zak,
     wcc,
     plotbands,
-    plotfile,
     ef,
     degenthresh,
     groupkramers,
@@ -327,10 +347,10 @@ def cli(
     correct_ecut0,
     trans_thresh,
     magmom,
-    # sindicators,
-    givehskpoints,
-    # givesikpoints,
-    ebrs
+    v,
+    json_file,
+    print_hs_kpoints,
+    symmetry_indicators
 ):
     """
     Defines the "irrep" command-line tool interface.
@@ -342,31 +362,26 @@ def cli(
         refuc = np.array(refuc.split(","), dtype=float).reshape((3, 3))
     if shiftuc:
         shiftuc = np.array(shiftuc.split(","), dtype=float).reshape(3)
-    
+
+    # rename the v flag to verbosity, to avoid overlap with local variables
+    verbosity = v    
     # Warning about kpnames
     if kpnames is not None:
         searchcell = True
+
     elif not searchcell:
-        print(("Warning: transformation to the convenctional unit "
+        msg = ("Warning: transformation to the convenctional unit "
                "cell will not be calculated, nor its validity checked "
                "(if given). See the description of flag -searchcell "
                "on:\n"
                "irrep --help"
-               ))
-        print(("Warning: -kpnames not specified. Only traces of "
+               )
+        log_message(msg, verbosity, 1)
+        msg = ("Warning: -kpnames not specified. Only traces of "
                "symmetry operations will be calculated. Remember that "
                "-kpnames must be specified to identify irreps"
-               ))
-
-    #if kpnames is None:
-    #    identify_irreps = False
-    #    print(("Warning: kpnames not specified. Only traces of "
-    #           "symmetry operations will be calculated. Remember that "
-    #           "kpnames must be specified to identify irreps"
-    #           )
-    #          )
-    #else:
-    #    identify_irreps = True
+               )
+        log_message(msg, verbosity, 1)
 
     # parse input arguments into lists if supplied
     if symmetries:
@@ -378,13 +393,24 @@ def cli(
     if kpnames:
         kpnames = kpnames.split(",")
 
-    try:
-        print(fwfk.split("/")[0].split("-"))
-        preline = " ".join(s.split("_")[1] for s in fwfk.split("/")[0].split("-")[:3])
-    except Exception as err:
-        # print(err)
-        preline = ""
-    json_data = {}
+    # Decide if wave functions should be kept in memory after calculating trace
+    if isymsep or wcc or zak:
+        save_wf = True
+    else:
+        save_wf = False
+
+    # Read magnetic moments from a file
+    if magmom is not None:
+        try:
+            magnetic_moments = np.loadtxt(magmom)
+        except FileNotFoundError as e:
+            print(f"The magnetic moments file was not found: {magmom}")
+            raise e
+        except ValueError as e:
+            print(f"Error reading magnetic moments file {magmom}")
+            raise e
+    else:
+        magnetic_moments = None
 
     if magmom is not None:
         try:
@@ -398,12 +424,10 @@ def cli(
     else:
         magnetic_moments = None
 
-    if onlysym is False:
-        onlysym = givehskpoints or givesikpoints
-
     bandstr = BandStructure(
         fWAV=fwav,
         fWFK=fwfk,
+        calculator_gpaw=gpaw_calc,
         prefix=prefix,
         fPOS=fpos,
         Ecut=ecut,
@@ -411,37 +435,33 @@ def cli(
         IBend=ibend,
         kplist=kpoints,
         spinor=spinor,
+        calculate_traces=True,
         code=code,
         EF=ef,
         onlysym=onlysym,
         refUC = refuc,
         shiftUC = shiftuc,
         search_cell = searchcell,
-        _correct_Ecut0=correct_ecut0,
-        magnetic_moments=magnetic_moments
+        degen_thresh=degenthresh,
+        magmom=magnetic_moments,
+        save_wf=save_wf,
+        verbosity=verbosity,
+        from_sym_file=from_sym_file,
+        include_TR=True  # if magnetic, include TR 
     )
 
-    json_data ["spacegroup"] = bandstr.spacegroup.show(symmetries=symmetries)
+    bandstr.spacegroup.show()
 
-    if givehskpoints:
-        print("\n########## High-symmetry k points ##########")
-        bandstr.spacegroup.give_kpoints()
+    if print_hs_kpoints:
+        bandstr.spacegroup.print_hs_kpoints()
 
-    if givesikpoints:
-        print("\n########## k points for symmetry indicator calculations ##########")
-        si_kpoints_tables = get_si_calculation_points(bandstr.spacegroup.number)
-        if si_kpoints_tables is None:
-            print("\nAll the symemtry indicators are trivial.")
-        else:
-            si_kpoints_calc = bandstr.spacegroup.kpoints_to_calculation_cell(si_kpoints_tables)
+    if writesym:
+        bandstr.spacegroup.write_sym_file(filename=prefix+".sym", alat=alat)
 
-            print("Coordinates in standard cell:\n")
-            for k in si_kpoints_tables:
-                print("\t {: .6f} {: .6f} {: .6f}".format(*k))
-            print("\nCoordinates in DFT cell:\n")
-            for k in si_kpoints_calc:
-                print("\t {: .6f} {: .6f} {: .6f}".format(*k))
     if onlysym:
+        json_data = {}
+        json_data ["spacegroup"] = bandstr.spacegroup.json(symmetries=symmetries)
+        dumpfn(json_data, json_file, indent=4)
         exit()
 
     with open("irreptable-template", "w") as f:
@@ -449,30 +469,73 @@ def cli(
                 bandstr.spacegroup.str()
                 )
 
+    # Identify irreps. If kpnames wasn't set, all will be labelled as None
+    bandstr.identify_irreps(kpnames, verbosity=verbosity)
+
+    # Temporary, until we make it valid for isymsep
+    bandstr.write_characters()
+
+    if symmetry_indicators:
+        bandstr.print_symmetry_indicators()
+
+    # Write irreps.dat file
+    if kpnames is not None:
+        bandstr.write_irrepsfile()
+
+    # Write trace.txt file
+    bandstr.write_trace()
+
+    # Temporary, until we make it valid for isymsep
+    json_data = {}
+    json_data ["spacegroup"] = bandstr.spacegroup.json(symmetries=symmetries)
+    json_bandstr = bandstr.json()
+    json_data['characters and irreps'] = [{"subspace": json_bandstr}]
+
+    # Separate in terms of symmetry eigenvalues
     subbands = {(): bandstr}
 
     if isymsep is not None:
         json_data["separated by symmetry"]=True
         json_data["separating symmetries"]=isymsep
+        tmp_subbands = {}
         for isym in isymsep:
-            print("Separating by symmetry operation # ", isym)
-            subbands = {
-                tuple(list(s_old) + [s_new]): sub
-                for s_old, bands in subbands.items()
-                for s_new, sub in bands.Separate(
-                    isym, degen_thresh=degenthresh, groupKramers=groupkramers
-                ).items()
-            }
+            print("\n-------- SEPARATING BY SYMMETRY # {} --------".format(isym))
+            for s_old, bs in subbands.items():
+                separated = bs.Separate(isym, groupKramers=groupkramers, verbosity=verbosity)
+                for s_new, bs_separated in separated.items():
+                    # Later, the sorting of evals will be based on the 
+                    # argument of each eval in terms of [0,2pi). So it's 
+                    # convenient to round the imag part around 0 to avoid
+                    # pulling apart 1.0+j1e-4 and 1.0-j1e-4
+                    if abs(s_new.imag) < 1e-4:
+                        s_new = complex(s_new.real, 0.0)
+                    evals = tuple(list(s_old) + [s_new])
+                    tmp_subbands[evals] = bs_separated
+            subbands = tmp_subbands
+        json_data["characters and irreps"]=[]
+        
+        # sort to have consistency between runs
+        for k in sort_vectors(subbands.keys()):
+            sub = subbands[k]
+            if isymsep is not None:
+                print(
+                    "\n\n\n\n ################################################ \n\n\n NEXT SUBSPACE:  ",
+                    " , ".join(
+                        "sym # {0} -> eigenvalue {1}".format(s, short(ev)) for s, ev in zip(isymsep, k)
+                    ),
+                )
+                sub.write_characters()
+                json_data["characters and irreps"].append({"symmetry eigenvalues": np.array(k) , "subspace": sub.json(symmetries)})
     else :
         json_data["separated by symmetry"]=False
         
 
+    dumpfn(json_data, json_file, indent=4)
+
     if zak:
         for k in subbands:
             print("symmetry eigenvalue : {0} \n Traces are : ".format(k))
-            subbands[k].write_characters(
-                degen_thresh=0.001, symmetries=symmetries
-            )
+            subbands[k].write_characters()
             print("symmetry eigenvalue : {0} \n Zak phases are : ".format(k))
             zak = subbands[k].zakphase()
             for n, (z, gw, gc, lgw) in enumerate(zip(*zak)):
@@ -495,33 +558,8 @@ def cli(
             )
         exit()
 
-    bandstr.write_trace(
-        degen_thresh=degenthresh,
-        symmetries=symmetries,
-    )
-    json_data["characters_and_irreps"]=[]
-    for k, sub in subbands.items():
-        if isymsep is not None:
-            print(
-                "\n\n\n\n ################################################ \n\n\n next subspace:  ",
-                " , ".join(
-                    "{0}:{1}".format(s, short(ev)) for s, ev in zip(isymsep, k)
-                ),
-            )
-        plotfile=None # being implemented, not finished yet...
-        characters = sub.write_characters(
-            degen_thresh=degenthresh,
-            symmetries=symmetries,
-            kpnames=kpnames,
-            preline=preline,
-            plotFile=plotfile,
-        )
-        json_data["characters_and_irreps"].append( {"symmetry_eigenvalues":k , "subspace": characters  }  )
-#        json_data["characters_and_irreps"].append( [k ,characters  ]  )
-
     if plotbands:
-        json_data["characters_and_irreps"] = {}
-        print("\nSaving bands for plotting (plotbands == True)")
+        print("\nplotbands = True --> writing bands")
         for k, sub in subbands.items():
             if isymsep is not None:
                 print(
@@ -539,38 +577,6 @@ def cli(
                     )
                     + ".dat"
                 )
-                fname1 = (
-                    "bands-sym-"
-                    + suffix
-                    + "-"
-                    + "-".join(
-                        "{0}:{1}".format(s, short(ev)) for s, ev in zip(isymsep, k)
-                    )
-                    + ".dat"
-                )
             else:
                 fname = "bands-{0}.dat".format(suffix)
-                fname1 = "bands-sym-{0}.dat".format(suffix)
-            with open(fname, "w") as f:
-                f.write(sub.write_bands())
-            sub.write_trace_all(degenthresh, fname=fname1)
-
-    dumpfn(json_data,"irrep-output.json",indent=4)
-
-    # if sindicators is not None:
-    #     for point in bandstr.kpoints:
-    #         print(point.K, point.K_std)
-    #     print("\n\n")
-    #     irreps = json_data["characters_and_irreps"][0]["subspace"]["k-points"]
-    #     try:
-    #         occ = int(sindicators)
-    #     except ValueError: # thrown by int(sindicators)
-    #         print("Introduce a valid occupation for symmetry indicators"
-    #             f" (you entered {sindicators})\n"
-    #             "SYMMETRY INDICATORS NOT COMPUTED.\n\n")
-
-    #     si_results = bandstr.compute_symmetry_indicators(irreps, occ)
-    
-    if ebrs:
-        show_ebr_decomposition(json_data, spinor)        
-
+            sub.write_plotfile(fname)

@@ -11,15 +11,18 @@
 ## "IrRep" code and under terms of GNU General Public license v3 #
 ## see LICENSE file in the                                       #
 ##                                                               #
-##  Written by Stepan Tsirkin, University of Zurich.             #
-##  e-mail: stepan.tsirkin@physik.uzh.ch                         #
+##  Written by Stepan Tsirkin                                    #
+##  e-mail: stepan.tsirkin@ehu.eus                               #
 ##################################################################
 
 
+from fractions import Fraction
+import warnings
 import numpy as np
 from scipy import constants
 import fortio
-
+import sys
+from typing import Any
 BOHR = constants.physical_constants['Bohr radius'][0] / constants.angstrom
 
 
@@ -123,10 +126,8 @@ def str2list_space(string):
     Ranges can be generated as part of the output `array`. For example, 
     `str2list('1,3-5,7')` will give as ouput `array([1,3,4,5,7])`.
     """
-    #    print ("str2list  <{0}> ".format(string))
     res = np.hstack([np.arange(*(np.array(s.split("-"), dtype=int) + np.array([0, 1])))
                      if "-" in s else np.array([int(s)]) for s in string.split()])
-#    print ("str2list  <{0}> -> <{1}>".format(string,res))
     return res
 
 
@@ -215,35 +216,308 @@ def short(x, nd=3):
         return fmt.format(x.imag) + "j"
     return short(x.real, nd) + short(1j * x.imag)
 
-def matrix_pprint(matrix, fmt=None, delimiter="|"):
+
+def split(l):
     """
-    Format an homogeneous array into a delimited matrix for printing
+    Determine symbol used for assignment and split accordingly.
 
     Parameters
     ---------
-    matrix : array
-        Array to format
-    fmt : str, default None
-        Format of the elements. Numeric types are always sign-padded
-    delimiter : string, default '|'
-        Delimiter for the matrix bounds
+    l : str
+        Part of a line read from .win file.
+    """
+    if "=" in l:
+        return l.split("=")
+    elif ":" in l:
+        return l.split(":")
+    else:
+        return l.split()
+
+
+def format_matrix(A):
+    """
+    Format array to print it.
+
+    Parameters
+    ----------
+    A : array
+        Matrix that should be printed.
 
     Returns
     -------
     str
-        formatted matrix string
+        Description of the matrix. Ready to be printed.
     """
-    output = ""
-    row_length = matrix.shape[1]
-    if fmt is None:
-        fmt = " .5f"
-    else:
-        fmt = " " + fmt if fmt[0] != " " else fmt
-    row_format = delimiter + ("{:{fmt}} " * row_length) + delimiter + "\n"
-    for row in matrix:
-        output += row_format.format(*row, fmt=fmt)
+    return "".join(
+        "   ".join("{0:+5.2f} {1:+5.2f}j".format(x.real, x.imag) for x in a)
+        + "\n"
+        for a in A
+    )
 
-    return output
+
+def log_message(msg, verbosity, level):
+    '''
+    Logger to decide if a message is printed or not
+
+    Parameters
+    ----------
+    msg : str
+        Message to print
+    verbosity : int
+        Verbosity set for the current run of the code
+    level : int
+        If `verbosity >= level`, the message will be printed
+    '''
+
+    if verbosity >= level:
+        print(msg)
+
+
+def orthogonalize(A, warning_threshold=np.inf, error_threshold=np.inf , verbosity=1,
+                  debug_msg=""):
+    """
+    Orthogonalize a square matrix, using SVD
+    
+    Parameters
+    ----------
+    A : array( (M,M), dtype=complex)
+        Matrix to orthogonalize.
+    warning_threshold : float, default=np.inf
+        Threshold for warning message. Is some singular values are far from 1
+    error_threshold : float, default=np.inf
+        Threshold for error message. Is some singular values are far from 1
+
+    Returns
+    -------
+    array( (M,M), dtype=complex)
+        Orthogonalized matrix
+    """
+    u, s, vh = np.linalg.svd(A)
+    if np.any(np.abs(s - 1) > error_threshold):
+        raise ValueError(f"Matrix is not orthogonal \n {A} \n {debug_msg}")
+    elif np.any(np.abs(s - 1) > warning_threshold):
+        log_message(f"Warning: Matrix is not orthogonal \n {A} \n {debug_msg}", 1)
+    return u @ vh
+
+def sort_vectors(list_of_vectors):
+    list_of_vectors = list(list_of_vectors)
+    print (list_of_vectors)
+    srt = arg_sort_vectors(list_of_vectors)
+    print (list_of_vectors, srt)
+    return [list_of_vectors[i] for i in srt]
+
+def arg_sort_vectors(list_of_vectors):
+    """
+    Compare two vectors, 
+    First, the longer vector is "larger"
+    second, we go element-by-element to compare
+    first compare the angle of the complex number (clockwise from the x-axis), then the absolute value
+    
+    Returns
+    -------
+    bool
+        True if v1>v2, False otherwise
+    """
+    if all( np.all(abs(np.array(key).imag)<1e-4) for key in list_of_vectors):
+        def key(x):
+            return np.real(x)
+    else:
+        def key(x):
+            return (np.angle(x)/(2*np.pi)+0.01)%1
+    def serialize(x, lenmax):
+        return [len(x)]+ [key(y) for y in x] + [0]*(lenmax-len(x))
+    lenmax = max([len(x) for x in list_of_vectors])
+    sort_key = [serialize(x, lenmax) for x in list_of_vectors]
+    srt = np.lexsort(np.array(sort_key).T, axis=0)
+    return srt
+
+def get_borders(E, thresh=1e-5, cyclic=False):
+    """
+    Get the borders of the blocks of degenerate eigenvalues.
+
+    Parameters
+    ----------
+    E : array
+        Eigenvalues.
+    thresh : float, default=1e-5
+        Threshold for the difference between eigenvalues.
+    cyclic : bool, default=False
+        If `True`, the first and last eigenvalues are considered to be close. 
+        (e.g. complex eigenvalues on the unit circle).
+
+    Returns
+    -------
+    array(int)
+        Borders of the blocks of degenerate eigenvalues.
+    """
+    if cyclic:
+        return np.where(abs(E - np.roll(E, 1)) > thresh)[0]
+    else:
+        return np.hstack([
+                [0],
+                np.where(abs(E[1:] - E[:-1]) > thresh)[0] + 1,
+                [len(E)],
+            ])
+
+def get_block_indices(E, thresh=1e-5, cyclic=False):
+    """
+    Get the indices of the blocks of degenerate eigenvalues.
+
+    Parameters
+    ----------
+    E : array
+        Eigenvalues.
+    thresh : float, default=1e-5
+        Threshold for the difference between eigenvalues.
+    cyclic : bool, default=False
+        If `True`, the first and last eigenvalues are considered to be close. 
+        (e.g. complex eigenvalues on the unit circle).
+
+    Returns
+    -------
+    array((N,2), dtype=int)
+        Indices of the blocks of degenerate eigenvalues.
+    """
+    borders = get_borders(E, thresh=thresh, cyclic=cyclic)
+    if cyclic:
+        return np.array([borders, np.roll(borders, -1)]).T
+    else:
+        return np.array([borders[:-1], borders[1:]]).T
+
+def grid_from_kpoints(kpoints, grid=None):
+    """
+    Given a list of kpoints in fractional coordinates, return a the size of the grid in each direction
+    if some k-points are repeated, they are counted only once
+    if some k-points are missing, an error is raised
+
+    Parameters
+    ----------
+    kpoints : np.array((nk, ndim), dtype=float)
+        list of kpoints in fractional coordinates
+
+    Returns
+    -------
+    grid : tuple(int)
+        size of the grid in each
+    selected_kpoints : list of int
+        indices of the selected kpoints
+
+    Raises
+    ------
+    ValueError
+        if some k-points are missing
+    """
+    if grid is None:
+        grid = tuple(np.lcm.reduce([Fraction(k).limit_denominator(100).denominator for k in kp]) for kp in kpoints.T)
+    npgrid = np.array(grid)
+    print(f"mpgrid = {npgrid}, {len(kpoints)}")
+    kpoints_unique = UniqueListMod1()
+    selected_kpoints = []
+    for i, k in enumerate(kpoints):
+        if is_round(k * npgrid, prec=1e-5):
+            if k not in kpoints_unique:
+                kpoints_unique.append(k)
+                selected_kpoints.append(i)
+            else:
+                warnings.warn(f"k-point {k} is repeated")
+    if len(kpoints_unique) < np.prod(grid):
+        raise ValueError(f"Some k-points are missing {len(kpoints_unique)}< {np.prod(grid)}")
+    if len(kpoints_unique) > np.prod(grid):
+        raise RuntimeError("Some k-points are taken twice - this must be a bug")
+    if len(kpoints_unique) < len(kpoints):
+        warnings.warn("Some k-points are not on the grid or are repeated")
+    return grid, selected_kpoints
+
+class UniqueList(list):
+    """	
+    A list that only allows unique elements.
+    uniqueness is determined by the == operator.
+    Thus, non-hashable elements are also allowed.
+    unlike set, the order of elements is preserved.
+    """
+
+    def __init__(self, iterator=[], count=False):
+        super().__init__()
+        self.do_count = count
+        if self.do_count:
+            self.counts = []
+        for x in iterator:
+            self.append(x)
+
+    def append(self, item, count=1):
+        for j, i in enumerate(self):
+            if i == item:
+                if self.do_count:
+                    self.counts[self.index(i)] += count
+                break
+        else:
+            super().append(item)
+            if self.do_count:
+                self.counts.append(1)
+
+    def index(self, value: Any, start=0, stop=sys.maxsize) -> int:
+        for i in range(start, stop):
+            if self[i] == value:
+                return i
+        raise ValueError(f"{value} not in list")
+
+    def __contains__(self, item):
+        for i in self:
+            if i == item:
+                return True
+        return False
+
+    def remove(self, value: Any, all=False) -> None:
+        for i in range(len(self)):
+            if self[i] == value:
+                if all or not self.do_count:
+                    del self[i]
+                    del self.counts[i]
+                else:
+                    self.counts[i] -= 1
+                    if self.counts[i] == 0:
+                        del self[i]
+                        del self.counts[i]
+                return
+
+
+class UniqueListMod1(UniqueList):
+
+    def __init__(self, iterator=[], tol=1e-5):
+        self.tol = tol
+        self.appended_indices = []
+        self.last_try_append = -1
+        super().__init__(iterator)
+
+    def append(self, item):
+        self.last_try_append += 1
+        for i in self:
+            if all_close_mod1(i, item, tol=self.tol):
+                break
+        else:
+            list.append(self, item)
+            self.appended_indices.append(self.last_try_append)
+
+    def __contains__(self, item):
+        for i in self:
+            if all_close_mod1(i, item, tol=self.tol):
+                return True
+        return False
+
+    def index(self, value: Any, start=0, stop=sys.maxsize) -> int:
+        stop = min(stop, len(self))
+        for i in range(start, stop):
+            if all_close_mod1(self[i], value):
+                return i
+        raise ValueError(f"{value} not in list")
+
+
+def all_close_mod1(a, b, tol=1e-5):
+    """check if two vectors are equal modulo 1"""
+    if not np.shape(a) == () and not np.shape(b) == () and (np.shape(a) != np.shape(b)):
+        return False
+    diff = a - b
+    return np.allclose(np.round(diff), diff, atol=tol)
 
 def vector_pprint(vector, fmt=None):
     """
@@ -267,21 +541,3 @@ def vector_pprint(vector, fmt=None):
         fmt = " " + fmt if fmt[0] != " " else fmt
 
     return ("[" + ("{:{fmt}} " * len(vector)) + "]").format(*vector, fmt=fmt)
-
-def compute_rec_lattice(lattice):
-    """
-    Vectorized way of computing the reciprocal lattice vectors
-
-    Parameters
-    ---------
-    vector : array
-        3x3 matrix with the cell vectors along the rows
-
-    Returns
-    -------
-    array
-        3x3 matrix with the reciprocal lattice vectors along the rows
-    """
-    return 2 * np.pi * np.linalg.inv(lattice.T)
-
- 

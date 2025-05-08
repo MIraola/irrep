@@ -1425,7 +1425,7 @@ class SpaceGroupIrreps(SpaceGroup):
 
             # Check if the group is centrosymmetric
             inv = None
-            for sym in self.u_symmetries:
+            for sym in self.symmetries:
                 if np.allclose(sym.rotation, -np.eye(3)):
                     inv = sym
 
